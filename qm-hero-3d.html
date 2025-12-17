@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QM 3D Carousel</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
+    #wrap { position: relative; width: 100%; height: 100%; }
+    canvas { display:block; width:100%; height:100%; }
+
+    /* volitelné: klikací overlay hint */
+    .hint {
+      position:absolute; left:16px; bottom:16px;
+      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: rgba(0,0,0,.55);
+      background: rgba(255,255,255,.7);
+      border: 1px solid rgba(0,0,0,.08);
+      padding: 8px 10px; border-radius: 10px;
+      backdrop-filter: blur(8px);
+      user-select: none;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="hint">Move mouse • Hover card • Click to focus</div>
+  </div>
+
+  <!-- Three.js (CDN) -->
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+
+  <script>
+    // ==============
+    // CONFIG
+    // ==============
+    const CONFIG = {
+      bg: { r: 1.0, g: 1.0, b: 1.0, alpha: 0.0 }, // průhledné pozadí pro Webflow
+      card: {
+        width: 1.55,         // velikost karty (world units)
+        height: 2.05,
+        bend: 0.22,          // "papír" prohnutí
+        segmentsW: 28,       // více segmentů = hladší ohyb
+        segmentsH: 36
+      },
+      ring: {
+        radius: 2.35,
+        y: 0.0,
+        baseRotationY: 0.0   // můžeš pootočit celý kruh
+      },
+      motion: {
+        parallax: 0.55,      // jak moc reaguje na myš
+        hoverLift: 0.22,     // jak moc se karta "zvedne" při hover
+        focusZ: 0.55,        // přiblížení karty při focus
+        ease: 0.08
+      },
+      perf: {
+        maxDpr: 1.75
+      }
+    };
+
+    // ==============
+    // HELPERS
+    // ==============
+    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+
+    // ==============
+    // SETUP
+    // ==============
+    const wrap = document.getElementById('wrap');
+    const scene = new THREE.Scene();
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+    renderer.setClearColor(new THREE.Color(CONFIG.bg.r, CONFIG.bg.g, CONFIG.bg.b), CONFIG.bg.alpha);
+    wrap.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 0.25, 6.2);
+
+    // Lights (jemné, "premium")
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(3, 4, 6);
+    scene.add(key);
+
+    const fill = new THREE.DirectionalLight(0xffffff, 0.55);
+    fill.position.set(-4, 2, 2);
+    scene.add(fill);
+
+    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(amb);
+
+    // ==============
+    // TEXTURES (nahraď URL vlastními obrázky)
+    // ==============
+    const loader = new THREE.TextureLoader();
+
+    // Tip: dej sem 3 PNG/JPG plakáty (ideálně 1200px na delší stranu)
+    const TEXTURE_URLS = [
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1520975958225-6b47f8e7a5b0?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?auto=format&fit=crop&w=1200&q=80"
+    ];
+
+    function loadTexture(url){
+      return new Promise((resolve, reject) => {
+        loader.load(url, (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = 8;
+          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+          resolve(tex);
+        }, undefined, reject);
+      });
+    }
+
+    // ==============
+    // "PAPER" GEOMETRY (prohnutí)
+    // ==============
+    function makeBentPlane(w, h, segW, segH, bend){
+      const geo = new THREE.PlaneGeometry(w, h, segW, segH);
+      const pos = geo.attributes.position;
+
+      // ohyb přes osu X (prohnutí do válce)
+      // x in [-w/2, w/2] -> z offset
+      for(let i=0; i<pos.count; i++){
+        const x = pos.getX(i);
+        const t = x / (w/2);               // -1..1
+        const z = - (t * t) * bend;        // parabola pro jemný ohyb
+        pos.setZ(i, z);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    }
+
+    // Materiál papíru: lehký "sheen"
+    function makeCardMaterial(tex){
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        roughness: 0.65,
+        metalness: 0.05
+      });
+    }
+
+    // ==============
+    // CARDS
+    // ==============
+    const cards = [];
+    const cardGroup = new THREE.Group();
+    cardGroup.rotation.y = CONFIG.ring.baseRotationY;
+    scene.add(cardGroup);
+
+    const raycaster = new THREE.Raycaster();
+    const mouseNdc = new THREE.Vector2(0,0);
+
+    let hovered = null;
+    let focusedIndex = -1;
+
+    async function init(){
+      const textures = await Promise.all(TEXTURE_URLS.map(loadTexture));
+
+      const geo = makeBentPlane(
+        CONFIG.card.width,
+        CONFIG.card.height,
+        CONFIG.card.segmentsW,
+        CONFIG.card.segmentsH,
+        CONFIG.card.bend
+      );
+
+      const count = textures.length;
+
+      for (let i=0; i<count; i++){
+        const mat = makeCardMaterial(textures[i]);
+        const mesh = new THREE.Mesh(geo, mat);
+
+        // pozice do kruhu
+        const a = (i / count) * Math.PI * 2;
+        const x = Math.cos(a) * CONFIG.ring.radius;
+        const z = Math.sin(a) * CONFIG.ring.radius;
+        mesh.position.set(x, CONFIG.ring.y, z);
+
+        // natočení směrem do středu
+        mesh.lookAt(0, CONFIG.ring.y, 0);
+        // malý tilt, aby to bylo "editorial"
+        mesh.rotation.z += (i - (count-1)/2) * 0.06;
+
+        // target state pro animaci
+        mesh.userData.basePos = mesh.position.clone();
+        mesh.userData.baseRot = mesh.rotation.clone();
+        mesh.userData.tPos = mesh.position.clone();
+        mesh.userData.tRot = mesh.rotation.clone();
+        mesh.userData.tScale = 1.0;
+
+        cardGroup.add(mesh);
+        cards.push(mesh);
+      }
+
+      onResize();
+      animate();
+    }
+
+    // ==============
+    // INTERACTION
+    // ==============
+    function setMouseFromEvent(e){
+      const r = wrap.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      const y = (e.clientY - r.top) / r.height;
+
+      mouseNdc.x = x * 2 - 1;
+      mouseNdc.y = -(y * 2 - 1);
+    }
+
+    function pick(){
+      raycaster.setFromCamera(mouseNdc, camera);
+      const hits = raycaster.intersectObjects(cards, false);
+      return hits.length ? hits[0].object : null;
+    }
+
+    wrap.addEventListener('mousemove', (e) => {
+      setMouseFromEvent(e);
+      const hit = pick();
+
+      if (hit !== hovered){
+        hovered = hit;
+        wrap.style.cursor = hovered ? 'pointer' : 'default';
+      }
+    }, { passive:true });
+
+    wrap.addEventListener('mouseleave', () => {
+      hovered = null;
+      wrap.style.cursor = 'default';
+    });
+
+    wrap.addEventListener('click', () => {
+      if (!hovered) {
+        focusedIndex = -1;
+        return;
+      }
+      const idx = cards.indexOf(hovered);
+      focusedIndex = (focusedIndex === idx) ? -1 : idx;
+    });
+
+    // ==============
+    // ANIMATION LOOP
+    // ==============
+    const state = {
+      camTX: 0, camTY: 0,
+      rotTX: 0, rotTY: 0
+    };
+
+    function updateTargets(){
+      // mouse parallax -> posuň kameru a lehce otoč group
+      state.camTX = mouseNdc.x * CONFIG.motion.parallax;
+      state.camTY = mouseNdc.y * CONFIG.motion.parallax * 0.35;
+      state.rotTY = mouseNdc.x * 0.18;
+      state.rotTX = mouseNdc.y * 0.08;
+
+      // karty: hover + focus
+      cards.forEach((m, i) => {
+        const basePos = m.userData.basePos;
+        const baseRot = m.userData.baseRot;
+
+        // default
+        m.userData.tPos.copy(basePos);
+        m.userData.tRot.copy(baseRot);
+        m.userData.tScale = 1.0;
+
+        const isHovered = (m === hovered);
+        const isFocused = (i === focusedIndex);
+
+        if (isHovered){
+          // zvedni a lehce přitáhni
+          const dir = basePos.clone().normalize();
+          m.userData.tPos.addScaledVector(dir, -0.18);
+          m.userData.tPos.y += CONFIG.motion.hoverLift;
+          m.userData.tScale = 1.03;
+        }
+
+        if (isFocused){
+          // vytáhni dopředu ke kameře
+          // směr ke středu -> posun směrem k (0,0,0), a pak kameře
+          const dirToCenter = basePos.clone().multiplyScalar(-1).normalize();
+          m.userData.tPos.addScaledVector(dirToCenter, 0.55);
+          m.userData.tPos.z += CONFIG.motion.focusZ;
+          m.userData.tPos.y += 0.18;
+          m.userData.tScale = 1.07;
+
+          // otoč víc čelem ke kameře (jemně)
+          m.userData.tRot.y = lerp(m.userData.tRot.y, 0, 0.35);
+        }
+      });
+    }
+
+    function animate(){
+      requestAnimationFrame(animate);
+      updateTargets();
+
+      // ease camera + group
+      camera.position.x = lerp(camera.position.x, state.camTX, CONFIG.motion.ease);
+      camera.position.y = lerp(camera.position.y, 0.25 + state.camTY, CONFIG.motion.ease);
+      camera.lookAt(0, 0.0, 0);
+
+      cardGroup.rotation.y = lerp(cardGroup.rotation.y, CONFIG.ring.baseRotationY + state.rotTY, CONFIG.motion.ease);
+      cardGroup.rotation.x = lerp(cardGroup.rotation.x, state.rotTX, CONFIG.motion.ease);
+
+      // ease cards
+      cards.forEach(m => {
+        m.position.x = lerp(m.position.x, m.userData.tPos.x, CONFIG.motion.ease);
+        m.position.y = lerp(m.position.y, m.userData.tPos.y, CONFIG.motion.ease);
+        m.position.z = lerp(m.position.z, m.userData.tPos.z, CONFIG.motion.ease);
+
+        m.rotation.x = lerp(m.rotation.x, m.userData.tRot.x, CONFIG.motion.ease);
+        m.rotation.y = lerp(m.rotation.y, m.userData.tRot.y, CONFIG.motion.ease);
+        m.rotation.z = lerp(m.rotation.z, m.userData.tRot.z, CONFIG.motion.ease);
+
+        const s = lerp(m.scale.x, m.userData.tScale, CONFIG.motion.ease);
+        m.scale.set(s, s, s);
+      });
+
+      renderer.render(scene, camera);
+    }
+
+    // ==============
+    // RESIZE
+    // ==============
+    function onResize(){
+      const w = wrap.clientWidth;
+      const h = wrap.clientHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, CONFIG.perf.maxDpr);
+
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(w, h, false);
+
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize', onResize);
+
+    // start
+    init().catch(err => {
+      console.error(err);
+      wrap.innerHTML = "<div style='padding:16px;font-family:system-ui'>3D failed to load.</div>";
+    });
+  </script>
+</body>
+</html>
