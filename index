@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QM 3D Carousel</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
+    #wrap { position: relative; width: 100%; height: 100%; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .hint {
+      position: absolute; left: 16px; top: 12px;
+      font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: .75;
+      user-select: none; pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+    .fail {
+      position:absolute; left:16px; top:16px;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="hint">Move mouse • Hover card • Click to focus</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+    const wrap = document.getElementById("wrap");
+
+    function fail(msg, err) {
+      console.error("[QM-3D] fail:", msg, err);
+      wrap.innerHTML = `<div class="fail">3D failed to load.<br><small>${msg}</small></div>`;
+    }
+
+    try {
+      if (!window.WebGLRenderingContext) throw new Error("WebGL not available in this browser.");
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      wrap.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+      camera.position.set(0, 0.3, 6);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.9);
+      scene.add(ambient);
+
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(2, 3, 4);
+      scene.add(dir);
+
+      // --- cards (procedural textures, no external assets) ---
+      function makeCardTexture(title, subtitle, a, b) {
+        const c = document.createElement("canvas");
+        c.width = 512; c.height = 768;
+        const g = c.getContext("2d");
+
+        const grd = g.createLinearGradient(0, 0, 512, 768);
+        grd.addColorStop(0, a);
+        grd.addColorStop(1, b);
+        g.fillStyle = grd;
+        g.fillRect(0, 0, c.width, c.height);
+
+        // soft frame
+        g.fillStyle = "rgba(255,255,255,0.85)";
+        roundRect(g, 24, 24, c.width - 48, c.height - 48, 28);
+        g.fill();
+
+        g.fillStyle = "rgba(0,0,0,0.85)";
+        g.font = "700 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        g.fillText(title, 52, 120);
+
+        g.fillStyle = "rgba(0,0,0,0.6)";
+        g.font = "500 22px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        wrapText(g, subtitle, 52, 170, c.width - 104, 30);
+
+        // small footer
+        g.fillStyle = "rgba(0,0,0,0.35)";
+        g.font = "600 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        g.fillText("QuietModule • 3D Hero", 52, c.height - 60);
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        return tex;
+      }
+
+      function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+        const words = text.split(" ");
+        let line = "";
+        for (let n = 0; n < words.length; n++) {
+          const testLine = line + words[n] + " ";
+          const metrics = ctx.measureText(testLine);
+          if (metrics.width > maxWidth && n > 0) {
+            ctx.fillText(line, x, y);
+            line = words[n] + " ";
+            y += lineHeight;
+          } else {
+            line = testLine;
+          }
+        }
+        ctx.fillText(line, x, y);
+      }
+
+      const colors = [
+        ["#f2f2f2", "#e0e0ff"],
+        ["#f7f0ff", "#e8fff9"],
+        ["#fff4f1", "#f0f7ff"],
+        ["#f2fff2", "#fff1ff"],
+        ["#f9fbff", "#fff6e8"],
+      ];
+
+      const group = new THREE.Group();
+      scene.add(group);
+
+      const cardGeo = new THREE.PlaneGeometry(1.2, 1.8, 1, 1);
+      const cards = [];
+      const count = 7;
+      const radius = 2.2;
+
+      for (let i = 0; i < count; i++) {
+        const [a, b] = colors[i % colors.length];
+        const tex = makeCardTexture(
+          `Card ${i + 1}`,
+          "Placeholder content. Replace textures later with real images.",
+          a, b
+        );
+        const mat = new THREE.MeshStandardMaterial({
+          map: tex,
+          roughness: 0.35,
+          metalness: 0.05,
+          transparent: true,
+        });
+        const mesh = new THREE.Mesh(cardGeo, mat);
+
+        const ang = (i / count) * Math.PI * 2;
+        mesh.position.set(Math.cos(ang) * radius, 0, Math.sin(ang) * radius);
+        mesh.lookAt(0, 0, 0);
+        mesh.userData.baseAngle = ang;
+        group.add(mesh);
+        cards.push(mesh);
+      }
+
+      // interaction
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let hovered = null;
+      let targetFocus = null;
+
+      function onPointerMove(e) {
+        const r = renderer.domElement.getBoundingClientRect();
+        const x = ((e.clientX - r.left) / r.width) * 2 - 1;
+        const y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+        pointer.set(x, y);
+      }
+
+      function onClick() {
+        if (hovered) targetFocus = hovered;
+      }
+
+      window.addEventListener("pointermove", onPointerMove, { passive: true });
+      window.addEventListener("click", onClick);
+
+      function resize() {
+        const w = wrap.clientWidth || 1;
+        const h = wrap.clientHeight || 1;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      let t0 = performance.now();
+      function tick(t) {
+        const dt = Math.min((t - t0) / 1000, 0.05);
+        t0 = t;
+
+        group.rotation.y += dt * 0.35;
+
+        // hover detect
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(cards, false);
+        hovered = hits.length ? hits[0].object : null;
+
+        for (const c of cards) {
+          const isHover = c === hovered;
+          const isFocus = c === targetFocus;
+
+          const s = isFocus ? 1.35 : isHover ? 1.15 : 1.0;
+          c.scale.lerp(new THREE.Vector3(s, s, 1), 0.12);
+
+          const lift = isFocus ? 0.25 : isHover ? 0.12 : 0;
+          c.position.y = THREE.MathUtils.lerp(c.position.y, lift, 0.12);
+
+          c.material.emissive.setHex(isFocus ? 0x111111 : isHover ? 0x080808 : 0x000000);
+        }
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(tick);
+      }
+
+      requestAnimationFrame(tick);
+    } catch (err) {
+      fail(err?.message || "Unknown error", err);
+    }
+  </script>
+</body>
+</html>
