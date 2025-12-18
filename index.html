@@ -1,588 +1,200 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="cs">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>QM Hero 3D – Ring Cards</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milla Nova Carousel Clone</title>
+    <style>
+        :root {
+            --bg-color: #e2e2e2;
+            --card-width: 300px;
+            --card-height: 450px;
+            --ring-radius: 500px; /* Vzdálenost karet od středu */
+        }
 
-  <style>
-    html,body{height:100%;margin:0;overflow:hidden;background:#fff}
-    #wrap{position:relative;width:100vw;height:100vh;overflow:hidden;background:#fff}
-    canvas{position:absolute;inset:0;display:block;z-index:1}
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg-color);
+            font-family: 'serif';
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
 
-    #hint{
-      position:absolute; top:14px; left:14px; z-index:3;
-      font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      color:#0b0b0b; opacity:.55; user-select:none; pointer-events:none;
-    }
+        /* Kontejner pro 3D scénu */
+        .scene {
+            width: 100%;
+            height: 100%;
+            perspective: 1500px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: grab;
+        }
 
-    /* Overlay only active when focused */
-    #overlay{
-      position:absolute; inset:0; z-index:2;
-      background:transparent;
-      display:none;
-      cursor:default;
-    }
-    #overlay.active{display:block;}
-  </style>
+        .scene:active { cursor: grabbing; }
+
+        /* Rotující válec */
+        .carousel {
+            position: relative;
+            width: var(--card-width);
+            height: var(--card-height);
+            transform-style: preserve-3d;
+            transition: transform 0.1s ease-out; /* Pro plynulost pohybu */
+        }
+
+        /* Jednotlivé karty */
+        .card {
+            position: absolute;
+            width: var(--card-width);
+            height: var(--card-height);
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+            backface-visibility: hidden;
+            user-select: none;
+            transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            pointer-events: none;
+        }
+
+        /* "Explore" tlačítko sledující myš */
+        .explore-badge {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            background: #a3322d;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0;
+            pointer-events: none;
+            transform: translate(-50%, -50%) scale(0);
+            transition: opacity 0.3s, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 10;
+        }
+
+        .card:hover .explore-badge {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* Text v pozadí (Chapter the Bride) */
+        .bg-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 100%;
+            z-index: -1;
+            color: rgba(0,0,0,0.05);
+            font-size: 8vw;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
 </head>
-
 <body>
-  <div id="wrap">
-    <div id="hint">Move mouse • Edge rotate • Click front card → Center → Settle → Pop • Click outside → Return</div>
-    <div id="overlay"></div>
-  </div>
 
-  <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js";
-
-    // -----------------------------
-    // Utils / defs
-    // -----------------------------
-    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-    const lerp  = (a,b,t)=>a+(b-a)*t;
-    const angNorm = (a)=>Math.atan2(Math.sin(a), Math.cos(a)); // [-pi,pi]
-    const expSmoothing = (lambda, dt)=> (1 - Math.exp(-lambda * dt));
-
-    // Terms:
-    // - "detach": vybranou kartu vytrhneme z ring group a dáme do scene, aby ring mohl couvnout bez karty.
-    // - "CENTER": otočení ringu tak, aby vybraná karta byla přesně uprostřed (heading 0).
-    // - "WAIT": krátký settle delay po centrování (aby to nebyl flash).
-    // - "POP": karta vyjede k uživateli, ring couvá dozadu a ostatní se utlumí.
-
-    // -----------------------------
-    // Tunables (feel)
-    // -----------------------------
-    const T = {
-      // Edge rotate (FREE)
-      DEAD: 0.23,
-      EDGE: 0.68,
-      MAX_VEL: 0.075,     // faster
-      VEL_LAMBDA: 16,
-      DAMP: 0.86,
-
-      // Centering (CENTER)
-      CENTER_K: 0.115,
-      CENTER_DAMP: 0.76,
-      CENTER_DONE_ANG: 0.006,
-      CENTER_DONE_VEL: 0.002,
-
-      // Wait after center
-      POP_DELAY_MS: 180,
-
-      // Pop/return
-      POP_DIST: 1.20,
-      POP_LAMBDA: 10,
-
-      // Dim & push back others
-      DIM_LAMBDA: 12,
-      BACK_DIST: 0.70,
-
-      // Ring retreat on focus (not affecting detached card)
-      RING_RETREAT_Z: -2.65,
-      RING_SCALE: 0.86,
-      FOCUS_LAMBDA: 10,
-
-      // Tilt
-      TILT_MAX: 0.20,
-      TILT_LAMBDA: 10,
-
-      // Click gating (front-only click)
-      FRONT_Z_THRESHOLD: 0.25, // camera-space z: > threshold means fairly front
-      FRONT_PICK_PX_RADIUS: 999999, // keep huge (raycaster already chooses nearest)
-    };
-
-    // -----------------------------
-    // Scene
-    // -----------------------------
-    const wrap = document.getElementById("wrap");
-    const overlay = document.getElementById("overlay");
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xffffff);
-
-    const camera = new THREE.PerspectiveCamera(48, wrap.clientWidth / wrap.clientHeight, 0.1, 120);
-    camera.position.set(0, 0.15, 7.2);
-
-    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    wrap.appendChild(renderer.domElement);
-
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 0.85));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.55);
-    dir.position.set(2, 3, 4);
-    scene.add(dir);
-
-    // -----------------------------
-    // Shaders
-    // -----------------------------
-    const vertex = /* glsl */`
-      varying vec2 vUv;
-      uniform float uTime;
-      uniform float uBend;
-      uniform float uHover;
-
-      void main(){
-        vUv = uv;
-        vec3 p = position;
-        float bend = uBend + uHover * 0.60;
-        float k = (p.x) * 0.55;
-        p.z += sin(k) * bend;
-        p.z += sin(uTime * 0.6 + p.y * 1.8) * 0.003;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      }
-    `;
-
-    const fragment = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D uMap;
-      uniform float uDim;
-      void main(){
-        vec4 tex = texture2D(uMap, vUv);
-        vec3 col = tex.rgb;
-        col = mix(col, col * 0.18, uDim);   // strong dim
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `;
-
-    function makePaperMaterial(map){
-      return new THREE.ShaderMaterial({
-        transparent: false,
-        side: THREE.DoubleSide,
-        uniforms:{
-          uTime:{ value:0 },
-          uBend:{ value:0.22 },
-          uHover:{ value:0.0 },
-          uDim:{ value:0.0 },
-          uMap:{ value: map }
-        },
-        vertexShader: vertex,
-        fragmentShader: fragment
-      });
-    }
-
-    // -----------------------------
-    // Ring + Cards
-    // -----------------------------
-    const group = new THREE.Group();
-    scene.add(group);
-
-    const CARD_W = 2.05, CARD_H = 2.80;
-    const SEG_X = 36, SEG_Y = 18;
-    const N = 10;
-    const R = 3.85;
-
-    function makeCardTexture(label){
-      const c = document.createElement("canvas");
-      c.width = 900; c.height = 1200;
-      const g = c.getContext("2d");
-
-      // base
-      g.fillStyle = "rgba(0,0,0,0.16)";
-      g.fillRect(0,0,c.width,c.height);
-
-      // radial highlight
-      const grd = g.createRadialGradient(260,240,40, 280,280,720);
-      grd.addColorStop(0,"rgba(255,255,255,0.18)");
-      grd.addColorStop(1,"rgba(255,255,255,0.00)");
-      g.fillStyle = grd;
-      g.fillRect(0,0,c.width,c.height);
-
-      // border
-      g.strokeStyle = "rgba(255,255,255,0.22)";
-      g.lineWidth = 6;
-      g.strokeRect(40,40,c.width-80,c.height-80);
-
-      // text (placeholder; you’ll later swap for QM font stack)
-      g.fillStyle = "rgba(15,15,15,0.88)";
-      g.font = "700 82px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      g.fillText(label, 90, 160);
-
-      g.fillStyle = "rgba(15,15,15,0.55)";
-      g.font = "500 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      g.fillText("QM card", 90, 235);
-
-      const tex = new THREE.CanvasTexture(c);
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      tex.needsUpdate = true;
-      return tex;
-    }
-
-    const cards = [];
-    for(let i=0;i<N;i++){
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEG_X, SEG_Y);
-      const tex = makeCardTexture(`Card ${i+1}`);
-      const mat = makePaperMaterial(tex);
-      const mesh = new THREE.Mesh(geo, mat);
-
-      const theta = i * (Math.PI * 2 / N);
-
-      // alternating micro-tilt vibe
-      const alt = (i % 2 === 0) ? 1 : -1;
-      mesh.rotation.z = alt * 0.03;
-
-      mesh.position.set(Math.cos(theta) * R, alt * 0.06, Math.sin(theta) * R);
-      mesh.lookAt(0,0,0);
-      mesh.rotateY(Math.PI);
-
-      group.add(mesh);
-      cards.push({ mesh, mat, theta, hover:0, pop:0 });
-    }
-
-    // -----------------------------
-    // Input + Raycast
-    // -----------------------------
-    let mouseX = 0, mouseY = 0;
-    window.addEventListener("mousemove",(e)=>{
-      mouseX = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseY = (e.clientY / window.innerHeight) * 2 - 1;
-    }, { passive:true });
-
-    const raycaster = new THREE.Raycaster();
-    const ndc = new THREE.Vector2();
-
-    function raycastAtClientXY(clientX, clientY){
-      const x = (clientX / window.innerWidth) * 2 - 1;
-      const y = (clientY / window.innerHeight) * 2 - 1;
-      ndc.set(x, -y);
-      raycaster.setFromCamera(ndc, camera);
-      return raycaster.intersectObjects(cards.map(c=>c.mesh), false);
-    }
-
-    function hoveredIndex(){
-      const hits = raycastAtClientXY(
-        (mouseX + 1) * 0.5 * window.innerWidth,
-        (-mouseY + 1) * 0.5 * window.innerHeight
-      );
-      if(!hits.length) return null;
-      const obj = hits[0].object;
-      const idx = cards.findIndex(c=>c.mesh===obj);
-      return idx >= 0 ? idx : null;
-    }
-
-    // "front-only" gating: card must be sufficiently front in camera-space
-    const _camSpace = new THREE.Vector3();
-    function isFrontEnough(mesh){
-      mesh.updateMatrixWorld(true);
-      _camSpace.copy(mesh.getWorldPosition(new THREE.Vector3())).applyMatrix4(camera.matrixWorldInverse);
-      // in camera space, objects in front have negative z (because camera looks down -Z).
-      // We'll convert to "frontness" by using -z (bigger is more front).
-      const frontness = -_camSpace.z;
-      return frontness > T.FRONT_Z_THRESHOLD;
-    }
-
-    // -----------------------------
-    // Rotation + State machine
-    // -----------------------------
-    let rotY = 0;
-    let rotVel = 0;
-
-    // FREE -> CENTERING -> WAIT -> FOCUSED -> UNFOCUS -> FREE
-    let state = "FREE";
-    let selected = null;
-    let focusTargetRotY = 0;
-
-    // focus amount 0..1 (for ring retreat/dim intensity)
-    let focusAmt = 0;
-
-    // detach handling
-    let detached = null; // { mesh, index }
-    const _wPos = new THREE.Vector3();
-    const _wQuat = new THREE.Quaternion();
-    const _wScale = new THREE.Vector3();
-    const _tmpPos = new THREE.Vector3();
-    const _tmpDir = new THREE.Vector3();
-
-    function cardCenterError(i){
-      // when group rotation is rotY, card i heading relative to camera center is theta+rotY
-      return angNorm(cards[i].theta + rotY); // want 0
-    }
-    function computeTargetRotY(i){
-      const err = cardCenterError(i);
-      return rotY - err;
-    }
-
-    function setOverlayActive(on){
-      overlay.classList.toggle("active", !!on);
-    }
-
-    function detachSelectedToScene(i){
-      if(detached) return;
-      const mesh = cards[i].mesh;
-
-      mesh.updateMatrixWorld(true);
-      mesh.getWorldPosition(_wPos);
-      mesh.getWorldQuaternion(_wQuat);
-      mesh.getWorldScale(_wScale);
-
-      group.remove(mesh);
-      scene.add(mesh);
-
-      mesh.position.copy(_wPos);
-      mesh.quaternion.copy(_wQuat);
-      mesh.scale.copy(_wScale);
-
-      detached = { mesh, index: i };
-    }
-
-    function attachSelectedBackToRing(){
-      if(!detached) return;
-      const i = detached.index;
-      const mesh = detached.mesh;
-
-      scene.remove(mesh);
-      group.add(mesh);
-
-      // reset local state; ring loop will place it properly next frame
-      mesh.position.set(0,0,0);
-      mesh.rotation.set(0,0,0);
-      mesh.scale.set(1,1,1);
-
-      detached = null;
-    }
-
-    function startCenterTo(i){
-      selected = i;
-      focusTargetRotY = computeTargetRotY(i);
-      state = "CENTERING";
-      setOverlayActive(true);
-    }
-
-    function startUnfocus(){
-      if(state === "UNFOCUS" || state === "FREE") return;
-      state = "UNFOCUS";
-      // overlay stays until we fully return
-    }
-
-    function resetToFree(){
-      state = "FREE";
-      selected = null;
-      rotVel = 0;
-      setOverlayActive(false);
-    }
-
-    // overlay click = always unfocus (reliable)
-    overlay.addEventListener("click", (e)=>{
-      e.preventDefault();
-      startUnfocus();
-    });
-
-    // click: pick only front cards; always center -> wait -> pop
-    window.addEventListener("click", (e)=>{
-      // if overlay active, it will catch clicks; but we still guard:
-      if(overlay.classList.contains("active")) return;
-
-      const hits = raycastAtClientXY(e.clientX, e.clientY);
-      if(!hits.length){
-        // no pick = nothing (in FREE)
-        return;
-      }
-      const obj = hits[0].object;
-      const idx = cards.findIndex(c=>c.mesh===obj);
-      if(idx < 0) return;
-
-      // front-only gating
-      if(!isFrontEnough(cards[idx].mesh)) return;
-
-      startCenterTo(idx);
-    });
-
-    // -----------------------------
-    // Animate
-    // -----------------------------
-    const clock = new THREE.Clock();
-    let waitStart = 0;
-
-    function tick(){
-      const dt = Math.min(clock.getDelta(), 0.033);
-      const t  = clock.elapsedTime;
-
-      // tilt (up/down)
-      const tiltX = clamp(-mouseY * T.TILT_MAX, -T.TILT_MAX, T.TILT_MAX);
-      group.rotation.x = lerp(group.rotation.x, tiltX, expSmoothing(T.TILT_LAMBDA, dt));
-
-      // hover bend
-      const hIdx = hoveredIndex();
-      for(let i=0;i<N;i++){
-        cards[i].hover *= 0.90;
-        if(hIdx === i) cards[i].hover = Math.min(1, cards[i].hover + 0.20);
-        cards[i].mat.uniforms.uTime.value = t;
-        cards[i].mat.uniforms.uHover.value = cards[i].hover;
-      }
-
-      // focusAmt ramp
-      const wantsFocus = (state === "CENTERING" || state === "WAIT" || state === "FOCUSED") ? 1 : 0;
-      const focusT = expSmoothing(T.FOCUS_LAMBDA, dt);
-
-      if(state === "UNFOCUS"){
-        focusAmt = lerp(focusAmt, 0, focusT);
-        if(focusAmt < 0.02){
-          // finish return
-          attachSelectedBackToRing();
-          // clear dim & pop quickly
-          for(let i=0;i<N;i++){
-            cards[i].mat.uniforms.uDim.value = 0;
-            cards[i].pop = 0;
-          }
-          focusAmt = 0;
-          resetToFree();
-        }
-      } else {
-        focusAmt = lerp(focusAmt, wantsFocus, focusT);
-      }
-
-      // ring retreat (only group)
-      group.position.z = lerp(0, T.RING_RETREAT_Z, focusAmt);
-      const s = lerp(1, T.RING_SCALE, focusAmt);
-      group.scale.set(s,s,s);
-
-      // FREE rotation by edge zones
-      if(state === "FREE"){
-        const ax = Math.abs(mouseX);
-        const sign = (mouseX < 0) ? -1 : 1;
-
-        let influence = 0;
-        if(ax > T.DEAD){
-          const u = (ax - T.DEAD) / (1 - T.DEAD);
-          influence = u*u;
+    <div class="bg-text">MILLA NOVA<br>CHAPTER THE BRIDE</div>
+
+    <div class="scene" id="scene">
+        <div class="carousel" id="carousel">
+            </div>
+    </div>
+
+    <script>
+        const carousel = document.getElementById('carousel');
+        const scene = document.getElementById('scene');
+        const cardCount = 10;
+        const radius = 550; // Poloměr kruhu
+        
+        let rotationY = 0;
+        let isDragging = false;
+        let startX = 0;
+        let velocity = 0;
+        let lastX = 0;
+
+        // 1. Generování karet
+        for (let i = 0; i < cardCount; i++) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // Úhel pro každou kartu v kruhu
+            const angle = i * (360 / cardCount);
+            card.style.transform = `rotateY(${angle}deg) translateZ(${radius}px)`;
+            
+            card.innerHTML = `
+                <div class="explore-badge">Explore</div>
+                <img src="https://picsum.photos/400/600?random=${i}" alt="Inspirace">
+            `;
+
+            // Efekt magnetického tlačítka
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const badge = card.querySelector('.explore-badge');
+                badge.style.left = `${x}px`;
+                badge.style.top = `${y}px`;
+            });
+
+            carousel.appendChild(card);
         }
 
-        let boost = 1.0;
-        if(ax > T.EDGE){
-          const v = (ax - T.EDGE) / (1 - T.EDGE);
-          boost = 1.0 + v * 1.8;
+        // 2. Logika otáčení (Drag & Inertia)
+        scene.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.pageX;
+            lastX = e.pageX;
+            velocity = 0;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const deltaX = e.pageX - lastX;
+            velocity = deltaX * 0.2; // Citlivost
+            rotationY += velocity;
+            lastX = e.pageX;
+            
+            updateRotation();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // 3. Setrvačnost (Inertia) - tohle dělá ten luxusní pocit
+        function applyInertia() {
+            if (!isDragging) {
+                velocity *= 0.95; // Tření
+                rotationY += velocity;
+                updateRotation();
+            }
+            requestAnimationFrame(applyInertia);
         }
 
-        const targetVel = clamp(sign * influence * T.MAX_VEL * boost, -T.MAX_VEL, T.MAX_VEL);
-        rotVel = lerp(rotVel, targetVel, expSmoothing(T.VEL_LAMBDA, dt));
-        rotVel *= T.DAMP;
-        rotY += rotVel;
-      }
-
-      // CENTERING: rotate ring to bring selected to center
-      if(state === "CENTERING" && selected !== null){
-        const err = angNorm(focusTargetRotY - rotY);
-        rotVel = rotVel * T.CENTER_DAMP + err * T.CENTER_K;
-        rotY += rotVel;
-
-        if(Math.abs(err) < T.CENTER_DONE_ANG && Math.abs(rotVel) < T.CENTER_DONE_VEL){
-          rotY = focusTargetRotY;
-          rotVel = 0;
-
-          // detach now so ring can move without selected
-          detachSelectedToScene(selected);
-
-          // settle wait
-          waitStart = performance.now();
-          state = "WAIT";
-        }
-      }
-
-      // WAIT: hold center, no pop yet
-      if(state === "WAIT" && selected !== null){
-        const err = angNorm(focusTargetRotY - rotY);
-        rotY += err * 0.12;
-
-        if(performance.now() - waitStart >= T.POP_DELAY_MS){
-          state = "FOCUSED";
-        }
-      }
-
-      // FOCUSED: keep micro-centering only
-      if(state === "FOCUSED" && selected !== null){
-        const err = angNorm(focusTargetRotY - rotY);
-        rotY += err * 0.10;
-        rotVel *= 0.6;
-      }
-
-      // UNFOCUS: no auto-free rotation; just keep stable while returning
-      if(state === "UNFOCUS"){
-        rotVel *= 0.85;
-        rotY += rotVel;
-      }
-
-      group.rotation.y = rotY;
-
-      // camera parallax
-      camera.position.x = mouseX * 0.18;
-      camera.position.y = 0.15 + (-mouseY) * 0.10;
-      camera.lookAt(0,0,0);
-
-      // -----------------------------
-      // Cards placement
-      // -----------------------------
-      const popT = expSmoothing(T.POP_LAMBDA, dt);
-      const dimT = expSmoothing(T.DIM_LAMBDA, dt);
-
-      const focusActive = (selected !== null && (state === "CENTERING" || state === "WAIT" || state === "FOCUSED"));
-      const isDetachedSelected = (detached && selected !== null && detached.index === selected);
-
-      for(let i=0;i<N;i++){
-        const c = cards[i];
-        const mesh = c.mesh;
-        const isSel = (selected === i);
-
-        // --- default ring positioning ONLY if not detached selected
-        if(!(isDetachedSelected && isSel)){
-          const th = c.theta;
-          const alt = (i % 2 === 0) ? 1 : -1;
-          mesh.position.set(Math.cos(th) * R, alt * 0.06, Math.sin(th) * R);
-          mesh.lookAt(0,0,0);
-          mesh.rotateY(Math.PI);
-
-          // small alternating z-tilt remains
-          // (already set rotation.z initially)
+        function updateRotation() {
+            carousel.style.transform = `rotateY(${rotationY}deg)`;
         }
 
-        // dim others in focus states
-        const targetDim = (focusActive && !isSel) ? 1 : 0;
-        c.mat.uniforms.uDim.value = lerp(c.mat.uniforms.uDim.value, targetDim, dimT);
-
-        // push back others (only while focusActive)
-        if(focusActive && !isSel){
-          mesh.updateMatrixWorld(true);
-          mesh.getWorldPosition(_tmpPos);
-          _tmpDir.copy(camera.position).sub(_tmpPos).normalize();
-          mesh.position.add(_tmpDir.multiplyScalar(-T.BACK_DIST * c.mat.uniforms.uDim.value));
-          mesh.scale.setScalar(1);
-        }
-
-        // selected pop: ONLY when detached AND state=FOCUSED
-        const targetPop = (isDetachedSelected && isSel && state === "FOCUSED") ? 1 : 0;
-        c.pop = lerp(c.pop, targetPop, popT);
-
-        if(isDetachedSelected && isSel){
-          // keep the card "on place" (world) and pop toward camera smoothly
-          mesh.updateMatrixWorld(true);
-          mesh.getWorldPosition(_tmpPos);
-          _tmpDir.copy(camera.position).sub(_tmpPos).normalize();
-
-          // move towards camera by pop amount
-          mesh.position.add(_tmpDir.multiplyScalar(T.POP_DIST * c.pop));
-
-          // slight scale for emphasis
-          mesh.scale.setScalar(1 + 0.10 * c.pop);
-        }
-
-        // when unfocusing, pop goes back smoothly (because targetPop=0)
-        if(isDetachedSelected && isSel && state === "UNFOCUS"){
-          // keep scaling in sync
-          mesh.scale.setScalar(1 + 0.10 * c.pop);
-        }
-      }
-
-      renderer.render(scene, camera);
-      requestAnimationFrame(tick);
-    }
-
-    window.addEventListener("resize", ()=>{
-      camera.aspect = wrap.clientWidth / wrap.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    });
-
-    tick();
-  </script>
+        applyInertia();
+    </script>
 </body>
 </html>
