@@ -2,375 +2,139 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Milla Nova | Replikace 1:1</title>
+    <title>Milla Nova 1:1 Fix</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <style>
-        body { margin: 0; background: #f4f4f4; overflow: hidden; font-family: 'Times New Roman', serif; }
-        canvas { display: block; outline: none; }
-
-        /* UI VRSTVA */
-        .ui-layer {
-            position: absolute; inset: 0; pointer-events: none;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 1;
-        }
-
-        .brand-title {
-            font-size: 8vh;
-            color: rgba(0,0,0,0.06);
-            letter-spacing: -2px;
-            text-transform: uppercase;
-            position: absolute;
-            top: 42%;
-            transform: translateY(-50%);
-            white-space: nowrap;
-        }
-
-        .brand-subtitle {
-            font-size: 14px; letter-spacing: 4px; color: #333;
-            text-transform: uppercase; margin-bottom: 20px;
-            position: absolute; top: 15%; opacity: 0.5;
-        }
-
-        /* CUSTOM KURZOR (EXPLORE) */
-        #explore-cursor {
-            position: fixed; top: 0; left: 0;
-            width: 90px; height: 90px;
-            background: #a3322d; color: #fff; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; font-family: sans-serif;
-            pointer-events: none; opacity: 0; transform: translate(-50%, -50%) scale(0.5);
-            transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            z-index: 100;
-            will-change: transform, left, top;
-        }
+        body { margin: 0; background: #f0f0f0; overflow: hidden; font-family: serif; }
+        #canvas-container { position: absolute; inset: 0; }
+        .ui { position: absolute; inset: 0; pointer-events: none; z-index: 10; display: flex; align-items: center; justify-content: center; }
+        .title { font-size: 10vw; color: rgba(0,0,0,0.05); text-transform: uppercase; white-space: nowrap; }
         
-        /* Pro fade-out efekt při zoomu */
-        body.zoomed .ui-layer { opacity: 0; transition: opacity 0.5s; }
+        #explore {
+            position: fixed; width: 100px; height: 100px; background: #9e2a2b; color: #fff;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 10px; text-transform: uppercase; pointer-events: none;
+            opacity: 0; scale: 0.5; z-index: 100; transform: translate(-50%, -50%);
+        }
     </style>
 </head>
 <body>
 
-    <div class="ui-layer">
-        <div class="brand-subtitle">Chapter the Bride</div>
-        <div class="brand-title">Milla Nova</div>
-    </div>
+<div id="explore">Explore</div>
+<div class="ui"><div class="title">Milla Nova</div></div>
+<div id="canvas-container"></div>
 
-    <div id="explore-cursor">Explore</div>
+<script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
-    <script type="module">
-        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+    const container = document.getElementById('canvas-container');
+    const explore = document.getElementById('explore');
+    
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+    
+    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 15;
 
-        // --- KONFIGURACE ---
-        const CONFIG = {
-            radius: 9,              // Poloměr válce
-            cardW: 4.2,             // Šířka karty
-            cardH: 6.0,             // Výška karty
-            gap: 12,                // Rozestup ve stupních mezi aktivními kartami
-            mouseSensitivity: 15,   // Kolik stupňů se scéna nakloní myší
-            bendStrength: 1.0,      // Síla prohnutí (Vertex Shader)
-            safeZone: 0.05          // 5% od okraje karty neaktivuje hover (ochranné pole)
-        };
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
 
-        // --- SETUP SCÉNY ---
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xf4f4f4); // Odpovídá webu
-        // Mlha pro skrytí okrajů válce vzadu
-        scene.fog = new THREE.FogExp2(0xf4f4f4, 0.04); 
+    // Skupina pro karty
+    const group = new THREE.Group();
+    scene.add(group);
 
-        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(0, 0, 16);
+    const textureLoader = new THREE.TextureLoader();
+    const cards = [];
+    const count = 7; // Celkový počet karet
+    const activeIndices = [1, 2, 3, 4]; // Tyto budou funkční (vepředu)
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        document.body.appendChild(renderer.domElement);
+    // Jednoduchá geometrie s prohnutím (bez bugujících shaderů)
+    const cardW = 3.5, cardH = 5;
+    const geometry = new THREE.PlaneGeometry(cardW, cardH, 20, 1);
+    
+    // Ruční ohnutí geometrie, aby se nebugovala v shaderu
+    const pos = geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = Math.pow(Math.abs(x), 2) * 0.1; // Jemné prohnutí dozadu
+        pos.setZ(i, z);
+    }
 
-        // --- SHADERY (Klíč k Milla Nova looku) ---
-        // Vertex Shader: Reálně ohne geometrii do oblouku
-        const bendVertexShader = `
-            uniform float uRadius;
-            varying vec2 vUv;
-            varying float vDepth;
-            
-            void main() {
-                vUv = uv;
-                vec3 pos = position;
-                
-                // Matematika prohnutí (cylinder projection)
-                float angle = pos.x / uRadius;
-                vec3 bentPos;
-                bentPos.x = uRadius * sin(angle);
-                bentPos.y = pos.y;
-                bentPos.z = uRadius * cos(angle) - uRadius;
-                
-                // Uložíme hloubku pro fragment shader
-                vec4 worldPosition = modelMatrix * vec4(bentPos, 1.0);
-                vDepth = worldPosition.z;
-                
-                gl_Position = projectionMatrix * viewMatrix * worldPosition;
-            }
-        `;
-
-        // Fragment Shader: Řeší texturu a stmívání vzdálených karet
-        const fragmentShader = `
-            uniform sampler2D uTexture;
-            uniform float uHover;
-            uniform float uOpacity;
-            uniform float uGrayscale;
-            varying vec2 vUv;
-            
-            void main() {
-                vec4 texColor = texture2D(uTexture, vUv);
-                
-                // Jemný grayscale pro neaktivní karty
-                float gray = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
-                vec3 finalColor = mix(texColor.rgb, vec3(gray), uGrayscale);
-                
-                // Zesvětlení při hoveru
-                finalColor = mix(finalColor, finalColor * 1.1, uHover);
-                
-                gl_FragColor = vec4(finalColor, uOpacity);
-            }
-        `;
-
-        // --- TVORBA KARET ---
-        const textureLoader = new THREE.TextureLoader();
-        // Placeholder obrázky (svatba/fashion styl)
-        const images = [
-            "https://images.unsplash.com/photo-1549416867-b52125f4fb47?q=80&w=600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1532348264878-8316dfc633a2?q=80&w=600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1596395716157-5582736cb47d?q=80&w=600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1546193430-c2d207739ed7?q=80&w=600&auto=format&fit=crop",
-            // Backgound filler images
-            "https://images.unsplash.com/photo-1520113426760-b089c8942918?q=80&w=600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1549416867-b52125f4fb47?q=80&w=600&auto=format&fit=crop"
-        ];
-
-        const geometry = new THREE.PlaneGeometry(CONFIG.cardW, CONFIG.cardH, 32, 1);
-        const cardGroup = new THREE.Group();
-        scene.add(cardGroup);
-
-        const cards = [];
-
-        // Funkce pro vytvoření karty
-        function createCard(index, isInteractive, angleDeg) {
-            const material = new THREE.ShaderMaterial({
-                uniforms: {
-                    uTexture: { value: textureLoader.load(images[index % images.length]) },
-                    uRadius: { value: CONFIG.radius },
-                    uHover: { value: 0 },
-                    uOpacity: { value: isInteractive ? 1.0 : 0.4 }, // Vzadu průhlednější
-                    uGrayscale: { value: isInteractive ? 0.0 : 0.8 } // Vzadu šedivé
-                },
-                vertexShader: bendVertexShader,
-                fragmentShader: fragmentShader,
-                transparent: true,
-                side: THREE.DoubleSide
-            });
-
-            const mesh = new THREE.Mesh(geometry, material);
-            
-            // Převod stupňů na radiány a umístění na kružnici
-            const angleRad = (angleDeg * Math.PI) / 180;
-            mesh.position.set(0, 0, 0); // Pozice řešena rotací groupy nebo shaderem? Zde jednoduše rotací parenta
-            
-            // Vytvoříme pivot pro každou kartu, abychom ji mohli umístit po obvodu
-            const pivot = new THREE.Object3D();
-            pivot.rotation.y = angleRad;
-            pivot.add(mesh);
-            
-            // Posun mesh v ose Z (radius)
-            mesh.position.z = CONFIG.radius; 
-            // Mesh se musí otočit, aby koukal do středu (nebo ven, dle shaderu)
-            // V našem shaderu ohýbáme "rovnou" plochu, takže mesh necháme na 0,0,0 lokálně v pivotu
-            // Ale musíme korigovat, aby shader seděl.
-            // Zjednodušení: Shader ohýbá geometrii. Mesh posuneme do radiusu.
-            mesh.position.set(0, 0, -CONFIG.radius); // Shader ohýbá "dozadu", tak posuneme mesh dopředu? 
-            // Pro jednoduchost shaderu: Mesh je v 0,0,0, pivot rotuje. Shader ohne mesh lokálně.
-            // Oprava: Aby shader fungoval správně s rotací scény, je lepší mesh nechat v 0 a pivotovat.
-            
-            // RESET GEOMETRY LOGIC PRO TENTO SPECIFICKÝ SHADER:
-            // Nejlepší pro tento efekt je, když jsou karty fyzicky umístěné v kruhu.
-            mesh.position.set(Math.sin(angleRad) * CONFIG.radius, 0, Math.cos(angleRad) * CONFIG.radius);
-            mesh.rotation.y = angleRad;
-            
-            mesh.userData = { 
-                id: index, 
-                isInteractive: isInteractive,
-                baseAngle: angleRad,
-                isHovered: false
-            };
-            
-            cardGroup.add(mesh);
-            cards.push(mesh);
-        }
-
-        // --- ROZMÍSTĚNÍ KARET ---
-        // 4 Hlavní karty (symetricky kolem středu: -gap*1.5, -gap*0.5, +gap*0.5, +gap*1.5)
-        createCard(0, true, -20);
-        createCard(1, true, -7);
-        createCard(2, true, 7);
-        createCard(3, true, 20);
-
-        // Dekorativní karty vzadu (mimo zorné pole)
-        createCard(4, false, -45);
-        createCard(5, false, 45);
-        createCard(6, false, -65);
-        createCard(7, false, 65);
-
-
-        // --- LOGIKA OVLÁDÁNÍ ---
-        const cursor = document.getElementById('explore-cursor');
-        let mouse = new THREE.Vector2();
-        let targetRotation = 0;
-        let currentRotation = 0;
-        let isZoomed = false; // Stav po kliknutí
+    for (let i = 0; i < count; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+            map: textureLoader.load(`https://picsum.photos/600/900?v=${i}`),
+            transparent: true,
+            opacity: activeIndices.includes(i) ? 1 : 0.3
+        });
         
-        // Raycaster
+        const mesh = new THREE.Mesh(geometry, mat);
+        
+        // Rozmístění do oblouku
+        const angle = (i - (count - 1) / 2) * 0.4; 
+        mesh.position.x = Math.sin(angle) * 10;
+        mesh.position.z = Math.cos(angle) * 2;
+        mesh.rotation.y = -angle * 0.5;
+        
+        mesh.userData = { interactive: activeIndices.includes(i) };
+        group.add(mesh);
+        cards.push(mesh);
+    }
+
+    // Interakce přes GSAP
+    let targetX = 0;
+    let isHovering = false;
+
+    window.addEventListener('mousemove', (e) => {
+        const x = (e.clientX / window.innerWidth) - 0.5;
+        targetX = x * 2; // Rozsah pohybu
+
+        // Pohyb kurzoru
+        gsap.to(explore, {
+            x: e.clientX,
+            y: e.clientY,
+            duration: 0.1
+        });
+
+        // Raycasting pro hover
+        const mouse = new THREE.Vector2(
+            (e.clientX / window.innerWidth) * 2 - 1,
+            -(e.clientY / window.innerHeight) * 2 + 1
+        );
+        
         const raycaster = new THREE.Raycaster();
-        
-        // Event Listeners
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('click', onClick);
-        window.addEventListener('resize', onResize);
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(cards);
 
-        function onMouseMove(event) {
-            if(isZoomed) return;
-
-            // Normalizovaná myš -1 až 1
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-            // 1. Ovládání Explore tlačítka (CSS)
-            cursor.style.transform = `translate(${event.clientX}px, ${event.clientY}px) translate(-50%, -50%) scale(${cursor.style.opacity > 0 ? 1 : 0.5})`;
-
-            // 2. Výpočet cílové rotace (Mapování myši na úhel)
-            // Pokud je myš vlevo, chceme vidět karty vpravo -> rotujeme záporně
-            // LIMITACE: Max 15 stupňů rotace
-            targetRotation = mouse.x * (CONFIG.mouseSensitivity * (Math.PI / 180));
-        }
-
-        function onClick(event) {
-            if(isZoomed) {
-                // Reset (back to overview) - volitelné
-                // isZoomed = false;
-                // document.body.classList.remove('zoomed');
-                return; 
+        if (intersects.length > 0 && intersects[0].object.userData.interactive) {
+            if (!isHovering) {
+                isHovering = true;
+                gsap.to(explore, { opacity: 1, scale: 1, duration: 0.3 });
             }
-
-            // Zkontrolujeme, zda klikáme na aktivní kartu
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(cards);
-
-            if (intersects.length > 0) {
-                const hit = intersects[0];
-                const card = hit.object;
-
-                if (card.userData.isInteractive) {
-                    performZoom(card);
-                }
+            // Zastavení pohybu při hoveru (Hover Lock)
+            targetX *= 0.2; 
+        } else {
+            if (isHovering) {
+                isHovering = false;
+                gsap.to(explore, { opacity: 0, scale: 0.5, duration: 0.3 });
             }
         }
+    });
 
-        // --- ANIMACE ZOOMU ---
-        function performZoom(targetCard) {
-            isZoomed = true;
-            document.body.classList.add('zoomed');
-            cursor.style.opacity = 0;
+    // Plynulá animace skupiny přes GSAP tick
+    gsap.ticker.add(() => {
+        // Plynulé naklánění celé skupiny
+        group.rotation.y += (targetX - group.rotation.y) * 0.05;
+        renderer.render(scene, camera);
+    });
 
-            // Cílová pozice: Kamera letí tak, aby karta byla uprostřed
-            // Místo složité matematiky kamery, jednoduše otočíme grouper tak, aby karta byla na 0
-            // a přiblížíme kameru.
-            
-            const targetGroupRot = -targetCard.userData.baseAngle; // Otočit skupinu proti úhlu karty
-            const startGroupRot = cardGroup.rotation.y;
-            
-            const startCamZ = camera.position.z;
-            const targetCamZ = CONFIG.radius - 2; // Velmi blízko
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-            // Jednoduchá animace smyčkou (v reálu použij GSAP)
-            let progress = 0;
-            
-            function zoomLoop() {
-                progress += 0.02;
-                if (progress > 1) progress = 1;
-                
-                // Ease function
-                const ease = 1 - Math.pow(1 - progress, 3); // Cubic out
-
-                // Interpolace rotace
-                currentRotation = startGroupRot + (targetGroupRot - startGroupRot) * ease;
-                cardGroup.rotation.y = currentRotation;
-
-                // Interpolace kamery
-                camera.position.z = startCamZ + (targetCamZ - startCamZ) * ease;
-
-                if (progress < 1) requestAnimationFrame(zoomLoop);
-            }
-            zoomLoop();
-        }
-
-
-        // --- MAIN LOOP ---
-        function animate() {
-            requestAnimationFrame(animate);
-
-            if (!isZoomed) {
-                // RAYCASTING (Hover Logic)
-                raycaster.setFromCamera(mouse, camera);
-                const intersects = raycaster.intersectObjects(cards);
-                
-                let activeHover = false;
-
-                // Reset všech karet
-                cards.forEach(c => {
-                    c.material.uniforms.uHover.value *= 0.9; // Fade out
-                });
-
-                if (intersects.length > 0) {
-                    const hit = intersects[0];
-                    const card = hit.object;
-                    const uv = hit.uv;
-
-                    // Ochranné pole (Safe Zone): Ignoruj okraje karty
-                    if (card.userData.isInteractive && 
-                        uv.x > CONFIG.safeZone && uv.x < (1 - CONFIG.safeZone) &&
-                        uv.y > CONFIG.safeZone && uv.y < (1 - CONFIG.safeZone)) {
-                        
-                        activeHover = true;
-                        
-                        // Zvýraznění karty
-                        card.material.uniforms.uHover.value = THREE.MathUtils.lerp(card.material.uniforms.uHover.value, 1, 0.1);
-
-                        // HOVER LOCK: Pokud hoverujeme, cílová rotace se blíží aktuální (zastavení)
-                        // Aby se scéna "zamkla" na kartě
-                        targetRotation = currentRotation; 
-                    }
-                }
-
-                // Zobrazení/Skrytí kurzoru
-                cursor.style.opacity = activeHover ? 1 : 0;
-                cursor.style.transform = `translate(${cursor.style.left}, ${cursor.style.top}) translate(-50%, -50%) scale(${activeHover ? 1 : 0})`;
-                
-                // FYZIKA ROTACE (Setrvačnost)
-                // Pokud hoverujeme, rotace se velmi zpomalí (damping)
-                const damping = activeHover ? 0.2 : 0.05; 
-                currentRotation += (targetRotation - currentRotation) * damping;
-                
-                cardGroup.rotation.y = currentRotation;
-            }
-
-            renderer.render(scene, camera);
-        }
-
-        animate();
-
-        function onResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-    </script>
+</script>
 </body>
 </html>
