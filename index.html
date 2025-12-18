@@ -8,14 +8,14 @@
     html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
     #wrap { position: relative; width: 100%; height: 100%; }
     canvas { display: block; width: 100%; height: 100%; }
-    .hint {
-      position: absolute; left: 16px; top: 12px;
+
+    .hint{
+      position:absolute; left:16px; top:12px;
       font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      opacity: .75;
-      user-select: none; pointer-events: none;
-      mix-blend-mode: multiply;
+      opacity:.75; user-select:none; pointer-events:none;
+      mix-blend-mode:multiply;
     }
-    .fail {
+    .fail{
       position:absolute; left:16px; top:16px;
       font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
@@ -23,7 +23,7 @@
 </head>
 <body>
   <div id="wrap">
-    <div class="hint">Move mouse • Hover card • Click to focus</div>
+    <div class="hint">Drag to rotate • Hover • Click to focus</div>
   </div>
 
   <script type="module">
@@ -41,48 +41,64 @@
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setClearAlpha(0);
       wrap.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-      camera.position.set(0, 0.3, 6);
 
-      const ambient = new THREE.AmbientLight(0xffffff, 0.9);
-      scene.add(ambient);
+      // Camera: víc "hero", méně ploché
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+      camera.position.set(0, 0.45, 7.0);
 
-      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-      dir.position.set(2, 3, 4);
-      scene.add(dir);
+      // Lights: čistší, méně šedé placky
+      scene.add(new THREE.AmbientLight(0xffffff, 0.85));
 
-      // --- cards (procedural textures, no external assets) ---
-      function makeCardTexture(title, subtitle, a, b) {
+      const key = new THREE.DirectionalLight(0xffffff, 0.95);
+      key.position.set(3, 4, 5);
+      scene.add(key);
+
+      const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+      fill.position.set(-4, 2, -2);
+      scene.add(fill);
+
+      // --- card textures (procedural, ale míň "placeholder") ---
+      function makeCardTexture(title, a, b) {
         const c = document.createElement("canvas");
-        c.width = 512; c.height = 768;
+        c.width = 768; c.height = 1024;
         const g = c.getContext("2d");
 
-        const grd = g.createLinearGradient(0, 0, 512, 768);
+        const grd = g.createLinearGradient(0, 0, c.width, c.height);
         grd.addColorStop(0, a);
         grd.addColorStop(1, b);
         g.fillStyle = grd;
         g.fillRect(0, 0, c.width, c.height);
 
-        // soft frame
-        g.fillStyle = "rgba(255,255,255,0.85)";
-        roundRect(g, 24, 24, c.width - 48, c.height - 48, 28);
+        // vignette
+        const vg = g.createRadialGradient(c.width*0.55, c.height*0.35, 50, c.width*0.55, c.height*0.35, c.width*0.9);
+        vg.addColorStop(0, "rgba(255,255,255,0.18)");
+        vg.addColorStop(1, "rgba(0,0,0,0.12)");
+        g.fillStyle = vg;
+        g.fillRect(0, 0, c.width, c.height);
+
+        // card body
+        g.fillStyle = "rgba(255,255,255,0.86)";
+        roundRect(g, 44, 44, c.width - 88, c.height - 88, 34);
         g.fill();
 
-        g.fillStyle = "rgba(0,0,0,0.85)";
-        g.font = "700 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        g.fillText(title, 52, 120);
+        // title
+        g.fillStyle = "rgba(0,0,0,0.88)";
+        g.font = "800 54px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        g.fillText(title, 86, 150);
 
-        g.fillStyle = "rgba(0,0,0,0.6)";
-        g.font = "500 22px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        wrapText(g, subtitle, 52, 170, c.width - 104, 30);
+        // small subline (minimal)
+        g.fillStyle = "rgba(0,0,0,0.55)";
+        g.font = "600 20px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        g.fillText("QuietModule • Interactive Hero", 86, 200);
 
-        // small footer
-        g.fillStyle = "rgba(0,0,0,0.35)";
-        g.font = "600 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        g.fillText("QuietModule • 3D Hero", 52, c.height - 60);
+        // footer mark
+        g.fillStyle = "rgba(0,0,0,0.20)";
+        g.font = "700 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        g.fillText("Drag • Hover • Focus", 86, c.height - 90);
 
         const tex = new THREE.CanvasTexture(c);
         tex.colorSpace = THREE.SRGBColorSpace;
@@ -100,80 +116,124 @@
         ctx.closePath();
       }
 
-      function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-        const words = text.split(" ");
-        let line = "";
-        for (let n = 0; n < words.length; n++) {
-          const testLine = line + words[n] + " ";
-          const metrics = ctx.measureText(testLine);
-          if (metrics.width > maxWidth && n > 0) {
-            ctx.fillText(line, x, y);
-            line = words[n] + " ";
-            y += lineHeight;
-          } else {
-            line = testLine;
-          }
-        }
-        ctx.fillText(line, x, y);
-      }
-
       const colors = [
-        ["#f2f2f2", "#e0e0ff"],
-        ["#f7f0ff", "#e8fff9"],
-        ["#fff4f1", "#f0f7ff"],
-        ["#f2fff2", "#fff1ff"],
-        ["#f9fbff", "#fff6e8"],
+        ["#f1f2ff", "#e7fff7"],
+        ["#fff1f3", "#f2f7ff"],
+        ["#f2fff2", "#fff2ff"],
+        ["#f6f0ff", "#fff6e8"],
+        ["#eef7ff", "#f6ffee"],
       ];
 
       const group = new THREE.Group();
       scene.add(group);
 
-      const cardGeo = new THREE.PlaneGeometry(1.2, 1.8, 1, 1);
+      // Geometrie větší, aby to v hero sekci nebylo “ztracené”
+      const cardGeo = new THREE.PlaneGeometry(1.45, 2.05, 1, 1);
+
       const cards = [];
       const count = 7;
-      const radius = 2.2;
+      const radius = 2.55;
 
       for (let i = 0; i < count; i++) {
         const [a, b] = colors[i % colors.length];
-        const tex = makeCardTexture(
-          `Card ${i + 1}`,
-          "Placeholder content. Replace textures later with real images.",
-          a, b
-        );
+        const tex = makeCardTexture(`Card ${i + 1}`, a, b);
+
         const mat = new THREE.MeshStandardMaterial({
           map: tex,
-          roughness: 0.35,
+          roughness: 0.28,
           metalness: 0.05,
           transparent: true,
         });
+
         const mesh = new THREE.Mesh(cardGeo, mat);
 
         const ang = (i / count) * Math.PI * 2;
-        mesh.position.set(Math.cos(ang) * radius, 0, Math.sin(ang) * radius);
-        mesh.lookAt(0, 0, 0);
         mesh.userData.baseAngle = ang;
+
+        // místo “plochého kruhu” lehce elipsa a drobný Z bias
+        mesh.position.set(Math.cos(ang) * radius, 0, Math.sin(ang) * (radius * 0.92));
+        mesh.lookAt(0, 0.05, 0);
+
         group.add(mesh);
         cards.push(mesh);
       }
 
-      // interaction
+      // --- Interaction: hover + click focus + drag rotate + idle ---
       const raycaster = new THREE.Raycaster();
-      const pointer = new THREE.Vector2();
-      let hovered = null;
-      let targetFocus = null;
+      const pointerNDC = new THREE.Vector2();
 
-      function onPointerMove(e) {
+      let hovered = null;
+      let focused = null;
+
+      // rotace “logika”
+      let rotY = 0;              // current rotation
+      let rotYVel = 0;           // inertial velocity
+      let rotYTarget = null;     // when focusing (snap)
+      let lastUserInputT = performance.now();
+
+      // drag
+      let dragging = false;
+      let dragLastX = 0;
+
+      function setPointerFromEvent(e) {
         const r = renderer.domElement.getBoundingClientRect();
         const x = ((e.clientX - r.left) / r.width) * 2 - 1;
         const y = -(((e.clientY - r.top) / r.height) * 2 - 1);
-        pointer.set(x, y);
+        pointerNDC.set(x, y);
       }
 
-      function onClick() {
-        if (hovered) targetFocus = hovered;
+      function onPointerMove(e) {
+        setPointerFromEvent(e);
+
+        if (dragging) {
+          const dx = e.clientX - dragLastX;
+          dragLastX = e.clientX;
+
+          // drag sensitivity
+          rotYVel = dx * 0.0032;
+          rotY += rotYVel;
+
+          rotYTarget = null;     // ruční input ruší snap
+          focused = null;        // ruční input ruší focus
+          lastUserInputT = performance.now();
+        }
+      }
+
+      function onPointerDown(e) {
+        dragging = true;
+        dragLastX = e.clientX;
+        lastUserInputT = performance.now();
+      }
+
+      function onPointerUp() {
+        dragging = false;
+        lastUserInputT = performance.now();
+      }
+
+      function focusCard(card) {
+        // chceme, aby vybraný card byl vpředu (Z směrem ke kameře),
+        // tedy jeho (baseAngle + rotY) má mířit do "front" (~0 rad).
+        // cardAngleWorld = baseAngle + rotY
+        // target: cardAngleWorld -> 0  => rotYTarget = -baseAngle
+        rotYTarget = -card.userData.baseAngle;
+        focused = card;
+        lastUserInputT = performance.now();
+      }
+
+      function onClick(e) {
+        // prevence “klik při drag”
+        if (dragging) return;
+
+        // recompute hover hit
+        setPointerFromEvent(e);
+        raycaster.setFromCamera(pointerNDC, camera);
+        const hits = raycaster.intersectObjects(cards, false);
+        if (hits.length) focusCard(hits[0].object);
       }
 
       window.addEventListener("pointermove", onPointerMove, { passive: true });
+      window.addEventListener("pointerdown", onPointerDown, { passive: true });
+      window.addEventListener("pointerup", onPointerUp, { passive: true });
       window.addEventListener("click", onClick);
 
       function resize() {
@@ -191,24 +251,56 @@
         const dt = Math.min((t - t0) / 1000, 0.05);
         t0 = t;
 
-        group.rotation.y += dt * 0.35;
-
         // hover detect
-        raycaster.setFromCamera(pointer, camera);
+        raycaster.setFromCamera(pointerNDC, camera);
         const hits = raycaster.intersectObjects(cards, false);
         hovered = hits.length ? hits[0].object : null;
 
+        // rotation update
+        const idle = (t - lastUserInputT) > 1600; // ms
+        if (rotYTarget !== null) {
+          // snap easing
+          const diff = THREE.MathUtils.euclideanModulo((rotYTarget - rotY) + Math.PI, Math.PI * 2) - Math.PI;
+          rotY += diff * Math.min(1, dt * 6.5);
+          rotYVel *= 0.85;
+
+          if (Math.abs(diff) < 0.0015) rotYTarget = null;
+        } else {
+          // inertial
+          rotY += rotYVel;
+          rotYVel *= 0.92;
+
+          // gentle idle drift (ne “točí se furt”)
+          if (idle && Math.abs(rotYVel) < 0.0008) {
+            rotY += dt * 0.10;
+          }
+        }
+
+        group.rotation.y = rotY;
+
+        // card styling / depth cues
         for (const c of cards) {
           const isHover = c === hovered;
-          const isFocus = c === targetFocus;
+          const isFocus = c === focused;
 
-          const s = isFocus ? 1.35 : isHover ? 1.15 : 1.0;
-          c.scale.lerp(new THREE.Vector3(s, s, 1), 0.12);
+          const s = isFocus ? 1.30 : isHover ? 1.10 : 1.0;
+          c.scale.lerp(new THREE.Vector3(s, s, 1), 0.14);
 
-          const lift = isFocus ? 0.25 : isHover ? 0.12 : 0;
-          c.position.y = THREE.MathUtils.lerp(c.position.y, lift, 0.12);
+          // místo “lift nahoru” spíš “hero push dopředu”
+          const zPush = isFocus ? 0.38 : isHover ? 0.16 : 0.0;
+          const baseAng = c.userData.baseAngle;
+          const x = Math.cos(baseAng) * radius;
+          const z = Math.sin(baseAng) * (radius * 0.92);
+          // push in local radial direction
+          const pushX = Math.cos(baseAng) * zPush;
+          const pushZ = Math.sin(baseAng) * zPush;
 
-          c.material.emissive.setHex(isFocus ? 0x111111 : isHover ? 0x080808 : 0x000000);
+          c.position.x = THREE.MathUtils.lerp(c.position.x, x + pushX, 0.14);
+          c.position.z = THREE.MathUtils.lerp(c.position.z, z + pushZ, 0.14);
+          c.position.y = THREE.MathUtils.lerp(c.position.y, isFocus ? 0.05 : 0.0, 0.14);
+
+          c.material.emissive.setHex(isFocus ? 0x141414 : isHover ? 0x0a0a0a : 0x000000);
+          c.material.emissiveIntensity = isFocus ? 0.9 : isHover ? 0.65 : 0.35;
         }
 
         renderer.render(scene, camera);
@@ -222,3 +314,4 @@
   </script>
 </body>
 </html>
+
