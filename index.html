@@ -1,291 +1,548 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Grid3x3, Layers, Zap, Rocket } from 'lucide-react';
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QM Process Timeline</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
 
-const ProcessTimeline = () => {
-  const [activePhase, setActivePhase] = useState(null);
-  const [scrollY, setScrollY] = useState(0);
-  const containerRef = useRef(null);
+body {
+  font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+  background: #0a0a0a;
+  color: #fff;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
 
-  const phases = [
-    {
-      id: 'discovery',
-      title: 'Discovery',
-      subtitle: 'Anchor Definition',
-      days: '0–30',
-      description: 'Definice anchor identity. Monogram, grid, baseline, ToV.',
-      icon: Camera,
-      color: 'from-blue-500 to-blue-600',
-      items: [
-        'Konstrukce monogramu',
-        'Multi-grid architecture',
-        'Anchor spacing system',
-        'ToV baseline'
-      ]
-    },
-    {
-      id: 'strategy',
-      title: 'Strategy',
-      subtitle: 'System Layer Build',
-      days: '31–60',
-      description: 'Brand system, web architecture, OPS engine, dokumentace.',
-      icon: Grid3x3,
-      color: 'from-purple-500 to-purple-600',
-      items: [
-        'Brand component library',
-        'Web system architecture',
-        'OPS & governance',
-        'Presentation engine'
-      ]
-    },
-    {
-      id: 'build',
-      title: 'Build',
-      subtitle: 'Fluid Identity Engine',
-      days: '61–90',
-      description: 'Mood-layers, adaptivní palety, pattern system, motion.',
-      icon: Layers,
-      color: 'from-emerald-500 to-emerald-600',
-      items: [
-        'Mood-layer engine',
-        'Adaptive visual system',
-        'Fluid governance',
-        'Full QA engine'
-      ]
-    },
-    {
-      id: 'iterate',
-      title: 'Iterate',
-      subtitle: '30/60/90 Cycles',
-      days: 'Ongoing',
-      description: 'Weekly quiet review, monthly audit, quarterly rebaseline.',
-      icon: Zap,
-      color: 'from-orange-500 to-orange-600',
-      items: [
-        'Weekly quiet cycle',
-        'Monthly system audit',
-        'Seasonal mood updates',
-        'Baseline adjustments'
-      ]
-    },
-    {
-      id: 'launch',
-      title: 'Launch',
-      subtitle: 'Full System Delivery',
-      days: 'D90+',
-      description: 'Complete Quiet Module engine. Anchor + System + Fluid.',
-      icon: Rocket,
-      color: 'from-red-500 to-red-600',
-      items: [
-        'Full brand engine',
-        'Web ecosystem live',
-        'Governance operational',
-        'Continuous evolution'
-      ]
-    }
-  ];
+/* Header */
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: rgba(10, 10, 10, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
 
-  useEffect(() => {
-    const handleScroll = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const scrollProgress = Math.max(0, Math.min(1, -rect.top / (rect.height - window.innerHeight)));
-        setScrollY(scrollProgress);
-      }
-    };
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
-    window.addEventListener('scroll', handleScroll);
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+.header-left h1 {
+  font-size: 14px;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.8);
+}
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans">
-      {/* Header */}
-      <div className="fixed top-0 left-0 right-0 z-50 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-sm font-light tracking-[0.3em] uppercase text-white/80">
-                Quiet Module
-              </h1>
-              <p className="text-[10px] tracking-[0.2em] uppercase text-white/40 mt-1">
-                Process Framework
-              </p>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-light text-white/90">90</div>
-              <div className="text-[10px] tracking-[0.15em] uppercase text-white/40">Days</div>
-            </div>
-          </div>
-        </div>
-      </div>
+.header-left p {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 4px;
+}
 
-      {/* Main Content */}
-      <div ref={containerRef} className="pt-32 pb-20">
-        <div className="max-w-7xl mx-auto px-8">
-          {/* Intro */}
-          <div className="mb-32 max-w-2xl">
-            <h2 className="text-4xl font-light mb-6 leading-tight">
-              Struktura před formou.<br />
-              Systém před stylem.
-            </h2>
-            <p className="text-white/60 text-lg leading-relaxed">
-              Quiet Module není projekt. Je to <span className="text-white/90">systémový engine</span> — 
-              pevná kostra (Anchor) a adaptivní vrstvy (Fluid). Výsledek: identita, která se pohybuje, ne rozpadá.
-            </p>
-          </div>
+.header-right {
+  text-align: right;
+}
 
-          {/* Timeline */}
-          <div className="relative">
-            {/* Vertical Line */}
-            <div className="absolute left-12 top-0 bottom-0 w-px bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
+.header-right .days {
+  font-size: 32px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.9);
+}
 
-            {/* Phases */}
-            <div className="space-y-24">
-              {phases.map((phase, idx) => {
-                const Icon = phase.icon;
-                const isActive = activePhase === phase.id;
-                const baseDelay = idx * 0.1;
+.header-right .label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
 
-                return (
-                  <div
-                    key={phase.id}
-                    className="relative pl-32 group"
-                    onMouseEnter={() => setActivePhase(phase.id)}
-                    onMouseLeave={() => setActivePhase(null)}
-                  >
-                    {/* Number Circle */}
-                    <div className="absolute left-0 top-0 w-24 h-24 rounded-full border border-white/20 flex items-center justify-center bg-[#0a0a0a] group-hover:border-white/40 transition-all duration-500">
-                      <Icon className="w-10 h-10 text-white/40 group-hover:text-white/80 transition-colors duration-500" />
-                    </div>
+/* Main */
+.main {
+  padding-top: 140px;
+  padding-bottom: 80px;
+}
 
-                    {/* Content Card */}
-                    <div
-                      className={`
-                        relative p-8 rounded-lg border border-white/10 bg-gradient-to-br from-white/5 to-transparent
-                        group-hover:border-white/20 group-hover:from-white/8
-                        transition-all duration-700 cursor-pointer
-                        ${isActive ? 'scale-[1.02] shadow-2xl shadow-white/5' : ''}
-                      `}
-                      style={{
-                        animation: `fadeInUp 0.8s ease-out ${baseDelay}s both`
-                      }}
-                    >
-                      {/* Days Badge */}
-                      <div className="absolute top-4 right-4">
-                        <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                          <span className="text-xs tracking-widest uppercase text-emerald-400">
-                            {phase.days}
-                          </span>
-                        </div>
-                      </div>
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
 
-                      {/* Title */}
-                      <div className="mb-4">
-                        <h3 className="text-3xl font-light mb-2 tracking-tight">
-                          {phase.title}
-                        </h3>
-                        <p className="text-sm tracking-[0.2em] uppercase text-white/40">
-                          {phase.subtitle}
-                        </p>
-                      </div>
+/* Intro */
+.intro {
+  margin-bottom: 120px;
+  max-width: 800px;
+}
 
-                      {/* Description */}
-                      <p className="text-white/70 leading-relaxed mb-6 max-w-2xl">
-                        {phase.description}
-                      </p>
+.intro h2 {
+  font-size: 48px;
+  font-weight: 300;
+  line-height: 1.3;
+  margin-bottom: 24px;
+}
 
-                      {/* Items Grid */}
-                      <div className="grid grid-cols-2 gap-3">
-                        {phase.items.map((item, i) => (
-                          <div
-                            key={i}
-                            className="flex items-start gap-2 text-sm text-white/60 group-hover:text-white/80 transition-colors duration-300"
-                            style={{
-                              animation: isActive ? `slideInLeft 0.4s ease-out ${i * 0.1}s both` : 'none'
-                            }}
-                          >
-                            <div className="w-1 h-1 rounded-full bg-white/40 mt-2 flex-shrink-0" />
-                            <span>{item}</span>
-                          </div>
-                        ))}
-                      </div>
+.intro p {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.7;
+}
 
-                      {/* Progress Indicator */}
-                      {isActive && (
-                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r overflow-hidden rounded-b-lg">
-                          <div
-                            className={`h-full bg-gradient-to-r ${phase.color}`}
-                            style={{
-                              animation: 'progressBar 1.5s ease-out'
-                            }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+.intro .highlight {
+  color: rgba(255, 255, 255, 0.9);
+}
 
-          {/* Footer CTA */}
-          <div className="mt-32 pt-16 border-t border-white/10">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/60 text-sm mb-2">Kontinuita, ne revoluce.</p>
-                <p className="text-white/40 text-xs tracking-wider uppercase">
-                  Systém se vyvíjí s projektem, ne proti němu.
-                </p>
-              </div>
-              <button className="px-8 py-4 rounded border border-white/20 hover:border-white/40 hover:bg-white/5 transition-all duration-300 text-sm tracking-wider uppercase">
-                Start Project
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+/* Timeline */
+.timeline {
+  position: relative;
+}
 
-      {/* CSS Animations */}
-      <style>{`
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
+.timeline-line {
+  position: absolute;
+  left: 48px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1), transparent);
+}
 
-        @keyframes slideInLeft {
-          from {
-            opacity: 0;
-            transform: translateX(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
+.phases {
+  display: flex;
+  flex-direction: column;
+  gap: 100px;
+}
 
-        @keyframes progressBar {
-          from {
-            width: 0%;
-          }
-          to {
-            width: 100%;
-          }
-        }
+/* Phase Card */
+.phase {
+  position: relative;
+  padding-left: 140px;
+  opacity: 0;
+  transform: translateY(30px);
+  transition: all 0.8s ease;
+}
 
-        * {
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-        }
-      `}</style>
+.phase.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.phase-circle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #0a0a0a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s ease;
+  font-size: 40px;
+}
+
+.phase:hover .phase-circle {
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: scale(1.05);
+}
+
+.phase-card {
+  position: relative;
+  padding: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent);
+  transition: all 0.7s ease;
+  cursor: pointer;
+}
+
+.phase:hover .phase-card {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent);
+  transform: scale(1.01);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.phase-badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.phase-badge span {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #10b981;
+}
+
+.phase-title h3 {
+  font-size: 36px;
+  font-weight: 300;
+  margin-bottom: 8px;
+}
+
+.phase-title p {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 24px;
+}
+
+.phase-description {
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.7;
+  margin-bottom: 24px;
+  max-width: 700px;
+}
+
+.phase-items {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.phase-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.3s ease;
+}
+
+.phase:hover .phase-item {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.phase-item::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+/* Progress Bar */
+.progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.phase:hover .progress-bar {
+  opacity: 1;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  animation: fillProgress 1.5s ease-out forwards;
+}
+
+@keyframes fillProgress {
+  to { width: 100%; }
+}
+
+/* Colors per phase */
+.phase:nth-child(1) .progress-fill { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+.phase:nth-child(2) .progress-fill { background: linear-gradient(90deg, #a855f7, #9333ea); }
+.phase:nth-child(3) .progress-fill { background: linear-gradient(90deg, #10b981, #059669); }
+.phase:nth-child(4) .progress-fill { background: linear-gradient(90deg, #f59e0b, #d97706); }
+.phase:nth-child(5) .progress-fill { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+/* Footer */
+.footer {
+  margin-top: 120px;
+  padding-top: 60px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer-left p {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.footer-left span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.footer button {
+  padding: 16px 32px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.footer button:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .phase {
+    padding-left: 80px;
+  }
+  
+  .phase-circle {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+  
+  .timeline-line {
+    left: 30px;
+  }
+  
+  .phase-items {
+    grid-template-columns: 1fr;
+  }
+  
+  .intro h2 {
+    font-size: 32px;
+  }
+  
+  .footer {
+    flex-direction: column;
+    gap: 24px;
+    text-align: center;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-content">
+    <div class="header-left">
+      <h1>Quiet Module</h1>
+      <p>Process Framework</p>
     </div>
-  );
+    <div class="header-right">
+      <div class="days">90</div>
+      <div class="label">Days</div>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="container">
+    <!-- Intro -->
+    <div class="intro">
+      <h2>Struktura před formou.<br>Systém před stylem.</h2>
+      <p>
+        Quiet Module není projekt. Je to <span class="highlight">systémový engine</span> — 
+        pevná kostra (Anchor) a adaptivní vrstvy (Fluid). Výsledek: identita, která se pohybuje, ne rozpadá.
+      </p>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline">
+      <div class="timeline-line"></div>
+      <div class="phases">
+        
+        <!-- Phase 1: Discovery -->
+        <div class="phase" data-phase="1">
+          <div class="phase-circle">📐</div>
+          <div class="phase-card">
+            <div class="phase-badge"><span>0–30</span></div>
+            <div class="phase-title">
+              <h3>Discovery</h3>
+              <p>Anchor Definition</p>
+            </div>
+            <div class="phase-description">
+              Definice anchor identity. Monogram, grid, baseline, ToV.
+            </div>
+            <div class="phase-items">
+              <div class="phase-item">Konstrukce monogramu</div>
+              <div class="phase-item">Multi-grid architecture</div>
+              <div class="phase-item">Anchor spacing system</div>
+              <div class="phase-item">ToV baseline</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <!-- Phase 2: Strategy -->
+        <div class="phase" data-phase="2">
+          <div class="phase-circle">⚡</div>
+          <div class="phase-card">
+            <div class="phase-badge"><span>31–60</span></div>
+            <div class="phase-title">
+              <h3>Strategy</h3>
+              <p>System Layer Build</p>
+            </div>
+            <div class="phase-description">
+              Brand system, web architecture, OPS engine, dokumentace.
+            </div>
+            <div class="phase-items">
+              <div class="phase-item">Brand component library</div>
+              <div class="phase-item">Web system architecture</div>
+              <div class="phase-item">OPS & governance</div>
+              <div class="phase-item">Presentation engine</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <!-- Phase 3: Build -->
+        <div class="phase" data-phase="3">
+          <div class="phase-circle">🔨</div>
+          <div class="phase-card">
+            <div class="phase-badge"><span>61–90</span></div>
+            <div class="phase-title">
+              <h3>Build</h3>
+              <p>Fluid Identity Engine</p>
+            </div>
+            <div class="phase-description">
+              Mood-layers, adaptivní palety, pattern system, motion.
+            </div>
+            <div class="phase-items">
+              <div class="phase-item">Mood-layer engine</div>
+              <div class="phase-item">Adaptive visual system</div>
+              <div class="phase-item">Fluid governance</div>
+              <div class="phase-item">Full QA engine</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <!-- Phase 4: Iterate -->
+        <div class="phase" data-phase="4">
+          <div class="phase-circle">🔄</div>
+          <div class="phase-card">
+            <div class="phase-badge"><span>Ongoing</span></div>
+            <div class="phase-title">
+              <h3>Iterate</h3>
+              <p>30/60/90 Cycles</p>
+            </div>
+            <div class="phase-description">
+              Weekly quiet review, monthly audit, quarterly rebaseline.
+            </div>
+            <div class="phase-items">
+              <div class="phase-item">Weekly quiet cycle</div>
+              <div class="phase-item">Monthly system audit</div>
+              <div class="phase-item">Seasonal mood updates</div>
+              <div class="phase-item">Baseline adjustments</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <!-- Phase 5: Launch -->
+        <div class="phase" data-phase="5">
+          <div class="phase-circle">🚀</div>
+          <div class="phase-card">
+            <div class="phase-badge"><span>D90+</span></div>
+            <div class="phase-title">
+              <h3>Launch</h3>
+              <p>Full System Delivery</p>
+            </div>
+            <div class="phase-description">
+              Complete Quiet Module engine. Anchor + System + Fluid.
+            </div>
+            <div class="phase-items">
+              <div class="phase-item">Full brand engine</div>
+              <div class="phase-item">Web ecosystem live</div>
+              <div class="phase-item">Governance operational</div>
+              <div class="phase-item">Continuous evolution</div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="footer-left">
+        <p>Kontinuita, ne revoluce.</p>
+        <span>Systém se vyvíjí s projektem, ne proti němu.</span>
+      </div>
+      <button>Start Project</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Scroll reveal animation
+const observerOptions = {
+  threshold: 0.2,
+  rootMargin: '0px 0px -100px 0px'
 };
 
-export default ProcessTimeline;
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, observerOptions);
+
+document.querySelectorAll('.phase').forEach(phase => {
+  observer.observe(phase);
+});
+
+// Reset progress bar animation on hover
+document.querySelectorAll('.phase').forEach(phase => {
+  phase.addEventListener('mouseenter', () => {
+    const fill = phase.querySelector('.progress-fill');
+    fill.style.animation = 'none';
+    setTimeout(() => {
+      fill.style.animation = 'fillProgress 1.5s ease-out forwards';
+    }, 10);
+  });
+});
+</script>
+
+</body>
+</html>
