@@ -3,37 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>QM Hero 3D – Cards Ring</title>
+  <title>QM Hero 3D – Ring Cards</title>
 
   <style>
-    :root{
-      --bg: #ffffff;
-      --card-bg: rgba(0,0,0,0.16);
-    }
-    html,body{ height:100%; margin:0; background:var(--bg); overflow:hidden; }
-
-    #wrap{
-      position:relative;
-      width:100vw; height:100vh;
-      overflow:hidden;
-      background:var(--bg);
-    }
-
-    /* Make sure the canvas fills the viewport and stays behind overlays */
-    canvas{
-      position:absolute;
-      inset:0;
-      display:block;
-      z-index:1;
-    }
+    html,body{height:100%;margin:0;overflow:hidden;background:#fff}
+    #wrap{position:relative;width:100vw;height:100vh;overflow:hidden;background:#fff}
+    canvas{position:absolute;inset:0;display:block;z-index:1}
 
     #grain{
-      position:absolute;
-      inset:0;
-      pointer-events:none;
-      z-index:2;
-      mix-blend-mode:multiply;
-      opacity:.18;
+      position:absolute; inset:0; z-index:2; pointer-events:none;
+      mix-blend-mode:multiply; opacity:.18;
       background:
         radial-gradient(circle at 20% 10%, rgba(0,0,0,.10), transparent 55%),
         radial-gradient(circle at 80% 30%, rgba(0,0,0,.06), transparent 60%),
@@ -42,24 +21,16 @@
     }
 
     #hint{
-      position:absolute;
-      top:14px; left:14px;
-      z-index:3;
-      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color:#0b0b0b;
-      opacity:.55;
-      user-select:none;
-      pointer-events:none;
+      position:absolute; top:14px; left:14px; z-index:3;
+      font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      color:#0b0b0b; opacity:.55; user-select:none; pointer-events:none;
     }
-
-    /* Optional: debug border to confirm full-screen */
-    /* #wrap{ outline:1px solid red; } */
   </style>
 </head>
 
 <body>
   <div id="wrap">
-    <div id="hint">Move mouse • Smooth ring • Paper bend</div>
+    <div id="hint">Move mouse • Edge-rotate • Snap center • Click focus</div>
     <div id="grain"></div>
   </div>
 
@@ -67,22 +38,29 @@
     import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js";
 
     // -----------------------------
-    // Scene / Camera / Renderer
+    // Definitions
     // -----------------------------
+    // Dead-zone: střední pásmo, kde se nespouští auto-rotace (jen drift).
+    // Edge-rotate: pásma u krajů, kde se rotace spouští automaticky podle vzdálenosti od středu.
+    // Snap: magnetické přitáhnutí nejbližší karty do středu (když nejsi v edge-rotate a nic není selected).
+    // Damping: tlumení rychlosti, aby pohyb působil fyzikálně (ne skokově).
+
     const wrap = document.getElementById("wrap");
 
+    // -----------------------------
+    // Scene
+    // -----------------------------
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
     const camera = new THREE.PerspectiveCamera(48, wrap.clientWidth / wrap.clientHeight, 0.1, 80);
-    camera.position.set(0, 0.15, 7.2); // closer & wider than before
+    camera.position.set(0, 0.15, 7.2);
 
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(wrap.clientWidth, wrap.clientHeight);
     wrap.appendChild(renderer.domElement);
 
-    // Light (subtle)
     const hemi = new THREE.HemisphereLight(0xffffff, 0x111111, 0.85);
     scene.add(hemi);
     const dir = new THREE.DirectionalLight(0xffffff, 0.55);
@@ -100,15 +78,12 @@
 
       void main(){
         vUv = uv;
-
         vec3 p = position;
 
-        // Paper-bend: curve along X, stronger on hover
-        float bend = uBend + uHover * 0.55;
+        float bend = uBend + uHover * 0.60;
         float k = (p.x) * 0.55;
         p.z += sin(k) * bend;
 
-        // tiny breathing to avoid "dead" look
         p.z += sin(uTime * 0.6 + p.y * 1.8) * 0.003;
 
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -122,19 +97,16 @@
       void main(){
         vec4 tex = texture2D(uMap, vUv);
 
-        // If texture has transparency, keep it. Otherwise show full plane.
-        // Slightly lift contrast to feel like "paper".
-        vec3 col = tex.rgb;
-        col = pow(col, vec3(0.95));
-
-        gl_FragColor = vec4(col, tex.a);
+        // IMPORTANT: pokud nechceš "průhledné karty", netahej alpha z textury.
+        // Vynutíme plnou neprůhlednost:
+        gl_FragColor = vec4(tex.rgb, 1.0);
       }
     `;
 
     function makePaperMaterial(map){
       return new THREE.ShaderMaterial({
-        transparent: true,
-        side: THREE.DoubleSide,     // IMPORTANT: prevent "missing half ring"
+        transparent: false,          // <- žádné průhledno
+        side: THREE.DoubleSide,
         uniforms:{
           uTime:{ value:0 },
           uBend:{ value:0.22 },
@@ -158,18 +130,18 @@
     const SEG_Y = 18;
 
     const N = 10;
-    const R = 3.85; // smaller so it fits camera frustum reliably
+    const R = 3.85;
 
     function makeCardTexture(label){
       const c = document.createElement("canvas");
       c.width = 900; c.height = 1200;
       const g = c.getContext("2d");
 
-      // background (your requested vibe)
+      // bg
       g.fillStyle = "rgba(0,0,0,0.16)";
       g.fillRect(0,0,c.width,c.height);
 
-      // soft highlight
+      // highlight
       const grd = g.createRadialGradient(250,220,40, 260,260,700);
       grd.addColorStop(0,"rgba(255,255,255,0.18)");
       grd.addColorStop(1,"rgba(255,255,255,0.00)");
@@ -186,7 +158,6 @@
       g.font = "700 82px system-ui, -apple-system, Segoe UI, Roboto, Arial";
       g.fillText(label, 90, 160);
 
-      // subtext
       g.fillStyle = "rgba(15,15,15,0.55)";
       g.font = "500 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
       g.fillText("QM card", 90, 235);
@@ -207,50 +178,102 @@
       const theta = i * (Math.PI * 2 / N);
       mesh.position.set(Math.cos(theta) * R, 0, Math.sin(theta) * R);
 
-      // IMPORTANT: face the center (or outward) consistently
-      // This makes the "front" predictable and avoids the "inward text" confusion.
       mesh.lookAt(0, 0, 0);
-      mesh.rotateY(Math.PI); // flip so the "front" is facing camera when on near side
+      mesh.rotateY(Math.PI); // front face to camera on near side
 
       group.add(mesh);
 
       cards.push({
-        mesh,
-        mat,
+        mesh, mat,
         theta,
-        hover: 0
+        hover: 0,
+        // animation state
+        pop: 0,        // 0..1
+        fade: 0        // 0..1 (for de-emphasis)
       });
     }
 
     // -----------------------------
-    // Interaction: smooth "ring follow" + hover-ish bend
+    // Input state
     // -----------------------------
-    let targetRotY = 0;
-    let rotY = 0;
+    let mouseX = 0, mouseY = 0; // normalized -1..1
+    let pointerDown = false;
 
-    let mouseX = 0, mouseY = 0;
     window.addEventListener("mousemove", (e)=>{
-      mouseX = (e.clientX / window.innerWidth) * 2 - 1; // -1..1
-      mouseY = (e.clientY / window.innerHeight) * 2 - 1; // -1..1
-
-      // Rotate ring by mouse X
-      targetRotY = mouseX * 0.55;
+      mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+      mouseY = (e.clientY / window.innerHeight) * 2 - 1;
     }, { passive:true });
 
-    // simple raycaster hover (optional but useful)
+    window.addEventListener("pointerdown", ()=>{ pointerDown = true; }, { passive:true });
+    window.addEventListener("pointerup", ()=>{ pointerDown = false; }, { passive:true });
+
+    // -----------------------------
+    // Raycast click select
+    // -----------------------------
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
+    let selected = null; // index or null
 
-    function updateHover(){
-      ndc.x = mouseX;
-      ndc.y = -mouseY;
-
+    function raycast(){
+      ndc.set(mouseX, -mouseY);
       raycaster.setFromCamera(ndc, camera);
-      const hits = raycaster.intersectObjects(cards.map(c=>c.mesh), false);
+      return raycaster.intersectObjects(cards.map(c=>c.mesh), false);
+    }
 
-      // decay all
+    window.addEventListener("click", ()=>{
+      const hits = raycast();
+      if(hits.length){
+        const hitObj = hits[0].object;
+        const idx = cards.findIndex(c => c.mesh === hitObj);
+        selected = (idx >= 0) ? idx : null;
+      } else {
+        selected = null;
+      }
+    });
+
+    // -----------------------------
+    // Motion: edge-rotate + snap
+    // -----------------------------
+    let rotY = 0;
+    let rotVel = 0;
+
+    const DEAD = 0.35;      // center dead-zone in normalized units
+    const EDGE = 0.78;      // edge threshold
+    const MAX_VEL = 0.018;  // cap rotation speed
+    const DAMP = 0.88;      // velocity damping
+
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+
+    // Returns angle error for bringing a given card to "front center"
+    function centerErrorForCard(i){
+      // We want that card's world angle aligns to camera "front".
+      // With our layout, front is roughly along +Z toward camera, but we rotate group.
+      const theta = cards[i].theta;
+      // card is at angle theta + rotY around Y
+      // target: make it near 0 (so it sits at front). We'll define "front" as theta+rotY ≈ 0.
+      let a = theta + rotY;
+      // normalize to [-pi, pi]
+      a = Math.atan2(Math.sin(a), Math.cos(a));
+      return a; // error in radians
+    }
+
+    function findClosestToCenter(){
+      let best = 0, bestAbs = Infinity;
+      for(let i=0;i<N;i++){
+        const e = centerErrorForCard(i);
+        const ae = Math.abs(e);
+        if(ae < bestAbs){ bestAbs = ae; best = i; }
+      }
+      return { idx: best, err: centerErrorForCard(best), absErr: Math.abs(centerErrorForCard(best)) };
+    }
+
+    // -----------------------------
+    // Hover bend (optional)
+    // -----------------------------
+    function updateHover(){
+      const hits = raycast();
       for(const c of cards) c.hover *= 0.90;
-
       if(hits.length){
         const hit = hits[0].object;
         const c = cards.find(x=>x.mesh === hit);
@@ -276,19 +299,111 @@
     function tick(){
       const t = clock.getElapsedTime();
 
-      // smooth rotation (inertia-ish)
-      rotY += (targetRotY - rotY) * 0.06;
+      // 1) Tilt the whole ring gently by mouseY
+      const tiltX = clamp(-mouseY * 0.18, -0.22, 0.22);
+      group.rotation.x = lerp(group.rotation.x, tiltX, 0.08);
+
+      // 2) Edge-trigger rotation zones
+      const ax = Math.abs(mouseX);
+      const sign = mouseX < 0 ? -1 : 1;
+
+      // Base influence (center = almost none, edges = strong)
+      let edgeInfluence = 0;
+      if(ax > DEAD){
+        // ramp up from DEAD..1
+        const u = (ax - DEAD) / (1 - DEAD);
+        edgeInfluence = u*u; // quadratic ramp
+      }
+
+      // Stronger beyond EDGE
+      let boost = 1.0;
+      if(ax > EDGE){
+        const v = (ax - EDGE) / (1 - EDGE);
+        boost = 1.0 + v * 1.6;
+      }
+
+      // If a card is selected, stop edge rotation (focus mode)
+      if(selected === null){
+        // convert influence to target velocity
+        const targetVel = clamp(sign * edgeInfluence * MAX_VEL * boost, -MAX_VEL, MAX_VEL);
+        // accelerate velocity toward target
+        rotVel = lerp(rotVel, targetVel, 0.10);
+      } else {
+        // freeze rotation speed in focus mode
+        rotVel = lerp(rotVel, 0, 0.12);
+      }
+
+      // apply damping and integrate
+      rotVel *= DAMP;
+      rotY += rotVel;
       group.rotation.y = rotY;
 
-      updateHover();
+      // 3) Snap-to-center magnet (only when not in edge zone and not selected)
+      // Condition: near center band OR low velocity, so it "locks" nicely.
+      if(selected === null){
+        const { idx, err, absErr } = findClosestToCenter();
 
-      // per-card paper bend
+        const nearCenterBand = (Math.abs(mouseX) < 0.55); // your “middle pásmo”
+        const slow = Math.abs(rotVel) < 0.0035;
+
+        // absErr is in radians; convert approx to pixels mentally: we treat < ~0.18 rad as "almost centered"
+        if(nearCenterBand && slow && absErr < 0.22){
+          // pull rotY by a fraction of the error (opposite sign)
+          rotY += (-err) * 0.06;
+          group.rotation.y = rotY;
+        }
+      }
+
+      // 4) Hover bend + uniforms
+      updateHover();
       for(const c of cards){
         c.mat.uniforms.uTime.value = t;
         c.mat.uniforms.uHover.value = c.hover;
       }
 
-      // subtle camera parallax
+      // 5) Click focus animation (selected pop + others de-emphasize)
+      for(let i=0;i<N;i++){
+        const c = cards[i];
+
+        const isSel = (selected === i);
+        const targetPop = isSel ? 1 : 0;
+
+        // Others fade when selected exists
+        const targetFade = (selected !== null && !isSel) ? 1 : 0;
+
+        c.pop = lerp(c.pop, targetPop, 0.10);
+        c.fade = lerp(c.fade, targetFade, 0.10);
+
+        // Move outward along its local normal (Z in card space), but we need world-ish.
+        // Easiest: translate on card's local Z (it faces outward by our lookAt + rotateY).
+        const popDist = 0.95;         // how much it comes out
+        const backDist = 0.35;        // how much others go back
+        const yLift = 0.10;           // subtle lift
+
+        // Reset base position on ring each frame (deterministic)
+        const baseTheta = c.theta;
+        c.mesh.position.set(Math.cos(baseTheta) * R, 0, Math.sin(baseTheta) * R);
+
+        // Apply pop/back in local space
+        // Selected: forward (negative local z because we rotated), Others: backward
+        if(isSel){
+          c.mesh.translateZ(-popDist * c.pop);
+          c.mesh.position.y += yLift * c.pop;
+          c.mesh.scale.setScalar(1 + 0.10 * c.pop);
+        } else {
+          c.mesh.translateZ(+backDist * c.fade);
+          c.mesh.scale.setScalar(1);
+        }
+
+        // Visual de-emphasis: use material opacity via shader? (we forced opaque)
+        // We'll emulate dimming by multiplying renderer color via mesh material color is not available in ShaderMaterial,
+        // so simplest is to adjust bend and slight y wobble; for true dimming we'd add a uniform.
+        // Quick trick: reduce hover/bend response on faded cards:
+        c.mat.uniforms.uHover.value *= (1 - 0.85 * c.fade);
+        c.mat.uniforms.uBend.value = lerp(0.22, 0.10, c.fade);
+      }
+
+      // 6) Camera parallax (subtle)
       camera.position.x = mouseX * 0.18;
       camera.position.y = 0.15 + (-mouseY) * 0.10;
       camera.lookAt(0, 0, 0);
@@ -296,6 +411,7 @@
       renderer.render(scene, camera);
       requestAnimationFrame(tick);
     }
+
     tick();
   </script>
 </body>
