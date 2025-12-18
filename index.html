@@ -9,7 +9,6 @@
     html,body{height:100%;margin:0;overflow:hidden;background:#fff}
     #wrap{position:relative;width:100vw;height:100vh;overflow:hidden;background:#fff}
     canvas{position:absolute;inset:0;display:block;z-index:1}
-
     #hint{
       position:absolute; top:14px; left:14px; z-index:3;
       font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
@@ -20,50 +19,63 @@
 
 <body>
   <div id="wrap">
-    <div id="hint">Move mouse • Edge rotate • Click → Center • Then pop</div>
+    <div id="hint">Move mouse • Edge rotate • Click any card → Center → Pop • Smooth return</div>
   </div>
 
   <script type="module">
     import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js";
 
-    // --------------------------------
+    // -----------------------------
     // Utils
-    // --------------------------------
+    // -----------------------------
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
     const lerp  = (a,b,t)=>a+(b-a)*t;
     const angNorm = (a)=>Math.atan2(Math.sin(a), Math.cos(a)); // [-pi,pi]
 
-    // --------------------------------
-    // Tuning (rychlosti + pocit)
-    // --------------------------------
-    const TUNE = {
-      // edge rotate feel
-      DEAD: 0.28,
-      EDGE: 0.70,
-      MAX_VEL: 0.045,     // ↑ rychlejší než předtím
-      VEL_SMOOTH: 0.13,
+    // time-based smoothing (frame-rate independent)
+    function expSmoothing(lambda, dt){
+      // returns t in [0..1] for lerp
+      return 1 - Math.exp(-lambda * dt);
+    }
+
+    // -----------------------------
+    // Tunables (feel)
+    // -----------------------------
+    const T = {
+      // Edge rotate
+      DEAD: 0.25,
+      EDGE: 0.68,
+      MAX_VEL: 0.055,         // faster
+      VEL_LAMBDA: 14,         // responsiveness
       DAMP: 0.86,
 
-      // centering spring
+      // Centering spring (fast but not flash)
       CENTER_K: 0.095,
       CENTER_DAMP: 0.78,
       CENTER_DONE_ANG: 0.006,
       CENTER_DONE_VEL: 0.002,
 
-      // pop feel
+      // Pop / return smooth
       POP_DIST: 1.15,
-      POP_EASE: 0.09,     // ↓ plynulejší
-      DIM_EASE: 0.10,
-      BACK_DIST: 0.35,
+      POP_LAMBDA: 10,         // smooth in/out
+      DIM_LAMBDA: 10,
+      BACK_DIST: 0.55,        // push others back more
 
-      // tilt
+      // Ring retreat on focus
+      RING_RETREAT_Z: -2.4,   // move ring away from camera
+      RING_SCALE: 0.86,
+
+      // Tilt
       TILT_MAX: 0.20,
-      TILT_EASE: 0.08
+      TILT_LAMBDA: 10,
+
+      // Hover-off cancel grace
+      HOVER_CANCEL_MS: 140
     };
 
-    // --------------------------------
+    // -----------------------------
     // Scene
-    // --------------------------------
+    // -----------------------------
     const wrap = document.getElementById("wrap");
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
@@ -74,337 +86,4 @@
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    wrap.appendChild(renderer.domElement);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x111111, 0.85));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.55);
-    dir.position.set(2, 3, 4);
-    scene.add(dir);
-
-    // --------------------------------
-    // Shaders (paper bend)
-    // --------------------------------
-    const vertex = /* glsl */`
-      varying vec2 vUv;
-      uniform float uTime;
-      uniform float uBend;
-      uniform float uHover;
-
-      void main(){
-        vUv = uv;
-        vec3 p = position;
-        float bend = uBend + uHover * 0.60;
-        float k = (p.x) * 0.55;
-        p.z += sin(k) * bend;
-        p.z += sin(uTime * 0.6 + p.y * 1.8) * 0.003;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      }
-    `;
-
-    const fragment = /* glsl */`
-      varying vec2 vUv;
-      uniform sampler2D uMap;
-      uniform float uDim;
-      void main(){
-        vec4 tex = texture2D(uMap, vUv);
-        vec3 col = tex.rgb;
-        col = mix(col, col * 0.30, uDim);
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `;
-
-    function makePaperMaterial(map){
-      return new THREE.ShaderMaterial({
-        transparent: false,
-        side: THREE.DoubleSide,
-        uniforms:{
-          uTime:{ value:0 },
-          uBend:{ value:0.22 },
-          uHover:{ value:0.0 },
-          uDim:{ value:0.0 },
-          uMap:{ value: map }
-        },
-        vertexShader: vertex,
-        fragmentShader: fragment
-      });
-    }
-
-    // --------------------------------
-    // Ring + Cards
-    // --------------------------------
-    const group = new THREE.Group();
-    scene.add(group);
-
-    const CARD_W = 2.05, CARD_H = 2.80;
-    const SEG_X = 36, SEG_Y = 18;
-    const N = 10;
-    const R = 3.85;
-
-    function makeCardTexture(label){
-      const c = document.createElement("canvas");
-      c.width = 900; c.height = 1200;
-      const g = c.getContext("2d");
-
-      g.fillStyle = "rgba(0,0,0,0.16)";
-      g.fillRect(0,0,c.width,c.height);
-
-      const grd = g.createRadialGradient(250,220,40, 260,260,700);
-      grd.addColorStop(0,"rgba(255,255,255,0.18)");
-      grd.addColorStop(1,"rgba(255,255,255,0.00)");
-      g.fillStyle = grd;
-      g.fillRect(0,0,c.width,c.height);
-
-      g.strokeStyle = "rgba(255,255,255,0.22)";
-      g.lineWidth = 6;
-      g.strokeRect(40,40,c.width-80,c.height-80);
-
-      g.fillStyle = "rgba(15,15,15,0.88)";
-      g.font = "700 82px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      g.fillText(label, 90, 160);
-
-      g.fillStyle = "rgba(15,15,15,0.55)";
-      g.font = "500 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      g.fillText("QM card", 90, 235);
-
-      const tex = new THREE.CanvasTexture(c);
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      tex.needsUpdate = true;
-      return tex;
-    }
-
-    const cards = [];
-    for(let i=0;i<N;i++){
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEG_X, SEG_Y);
-      const tex = makeCardTexture(`Card ${i+1}`);
-      const mat = makePaperMaterial(tex);
-      const mesh = new THREE.Mesh(geo, mat);
-
-      const theta = i * (Math.PI * 2 / N);
-      mesh.position.set(Math.cos(theta) * R, 0, Math.sin(theta) * R);
-
-      mesh.lookAt(0,0,0);
-      mesh.rotateY(Math.PI);
-
-      group.add(mesh);
-      cards.push({ mesh, mat, theta, hover:0, pop:0 });
-    }
-
-    // --------------------------------
-    // Input + Raycast
-    // --------------------------------
-    let mouseX = 0, mouseY = 0;
-    window.addEventListener("mousemove",(e)=>{
-      mouseX = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseY = (e.clientY / window.innerHeight) * 2 - 1;
-    }, { passive:true });
-
-    const raycaster = new THREE.Raycaster();
-    const ndc = new THREE.Vector2();
-    function raycast(){
-      ndc.set(mouseX, -mouseY);
-      raycaster.setFromCamera(ndc, camera);
-      return raycaster.intersectObjects(cards.map(c=>c.mesh), false);
-    }
-    function hoveredIndex(){
-      const hits = raycast();
-      if(!hits.length) return null;
-      const obj = hits[0].object;
-      const idx = cards.findIndex(c=>c.mesh===obj);
-      return (idx>=0) ? idx : null;
-    }
-
-    // --------------------------------
-    // Rotation model
-    // --------------------------------
-    let rotY = 0;
-    let rotVel = 0;
-
-    // --------------------------------
-    // State machine
-    // FREE -> CENTERING -> FOCUSED
-    // --------------------------------
-    let state = "FREE";     // FREE | CENTERING | FOCUSED
-    let selected = null;
-    let focusTargetRotY = 0;
-
-    function cardCenterError(i){
-      return angNorm(cards[i].theta + rotY); // want 0
-    }
-    function computeTargetRotY(i){
-      const err = cardCenterError(i);
-      return rotY - err;
-    }
-    function isFrontEnough(i){
-      // front test for POP only (not for starting center)
-      const err = Math.abs(cardCenterError(i));
-      const wpos = new THREE.Vector3();
-      cards[i].mesh.getWorldPosition(wpos);
-      return (err < 0.22) && (wpos.z > 0.0);
-    }
-
-    function startCenterTo(i){
-      selected = i;
-      focusTargetRotY = computeTargetRotY(i);
-      state = "CENTERING";
-    }
-
-    function cancelFocus(){
-      state = "FREE";
-      selected = null;
-    }
-
-    window.addEventListener("click", ()=>{
-      const hits = raycast();
-      if(!hits.length){
-        cancelFocus();
-        return;
-      }
-      const idx = hoveredIndex();
-      if(idx === null){ cancelFocus(); return; }
-
-      // Toggle off if clicking selected while focused
-      if(selected === idx && state === "FOCUSED"){
-        cancelFocus();
-        return;
-      }
-
-      // IMPORTANT FIX:
-      // Clicking ANY visible card should ALWAYS initiate CENTERING.
-      startCenterTo(idx);
-    });
-
-    // --------------------------------
-    // Animate
-    // --------------------------------
-    const clock = new THREE.Clock();
-    const tmpPos = new THREE.Vector3();
-    const tmpDir = new THREE.Vector3();
-
-    function tick(){
-      const t = clock.getElapsedTime();
-
-      // Tilt (subtle)
-      const tiltX = clamp(-mouseY * TUNE.TILT_MAX, -TUNE.TILT_MAX, TUNE.TILT_MAX);
-      group.rotation.x = lerp(group.rotation.x, tiltX, TUNE.TILT_EASE);
-
-      // Hover
-      const hIdx = hoveredIndex();
-      for(let i=0;i<N;i++){
-        cards[i].hover *= 0.90;
-        if(hIdx === i) cards[i].hover = Math.min(1, cards[i].hover + 0.20);
-        cards[i].mat.uniforms.uTime.value = t;
-        cards[i].mat.uniforms.uHover.value = cards[i].hover;
-      }
-
-      // Auto-cancel focus when you hover off selected (your rule)
-      if(selected !== null && (state === "CENTERING" || state === "FOCUSED")){
-        if(hIdx === null || hIdx !== selected){
-          cancelFocus();
-        }
-      }
-
-      // ROTATION
-      if(state === "FREE"){
-        const ax = Math.abs(mouseX);
-        const sign = (mouseX < 0) ? -1 : 1;
-
-        let influence = 0;
-        if(ax > TUNE.DEAD){
-          const u = (ax - TUNE.DEAD) / (1 - TUNE.DEAD);
-          influence = u*u;
-        }
-
-        let boost = 1.0;
-        if(ax > TUNE.EDGE){
-          const v = (ax - TUNE.EDGE) / (1 - TUNE.EDGE);
-          boost = 1.0 + v * 1.8;
-        }
-
-        const targetVel = clamp(sign * influence * TUNE.MAX_VEL * boost, -TUNE.MAX_VEL, TUNE.MAX_VEL);
-        rotVel = lerp(rotVel, targetVel, TUNE.VEL_SMOOTH);
-        rotVel *= TUNE.DAMP;
-        rotY += rotVel;
-      }
-
-      if(state === "CENTERING"){
-        const err = angNorm(focusTargetRotY - rotY);
-        rotVel = rotVel * TUNE.CENTER_DAMP + err * TUNE.CENTER_K;
-        rotY += rotVel;
-
-        if(Math.abs(err) < TUNE.CENTER_DONE_ANG && Math.abs(rotVel) < TUNE.CENTER_DONE_VEL){
-          rotY = focusTargetRotY;
-          rotVel = 0;
-          state = "FOCUSED";
-        }
-      }
-
-      if(state === "FOCUSED"){
-        // keep locked
-        const err = angNorm(focusTargetRotY - rotY);
-        rotY += err * 0.10;
-        rotVel *= 0.6;
-      }
-
-      group.rotation.y = rotY;
-
-      // POP / DIM (2-phase behavior)
-      for(let i=0;i<N;i++){
-        const c = cards[i];
-        const isSel = (selected === i);
-
-        // base ring placement (never move into center of ring)
-        const th = c.theta;
-        c.mesh.position.set(Math.cos(th) * R, 0, Math.sin(th) * R);
-
-        // face inward consistently
-        c.mesh.lookAt(0,0,0);
-        c.mesh.rotateY(Math.PI);
-
-        // during CENTERING: pop = 0 (explicit)
-        // during FOCUSED: pop only if card is actually centered/front enough
-        let targetPop = 0;
-        if(isSel && state === "FOCUSED" && isFrontEnough(i)){
-          targetPop = 1;
-        }
-        c.pop = lerp(c.pop, targetPop, TUNE.POP_EASE);
-
-        // dim others when centering or focused
-        const focusActive = (selected !== null && (state === "CENTERING" || state === "FOCUSED"));
-        const targetDim = (focusActive && !isSel) ? 1 : 0;
-        c.mat.uniforms.uDim.value = lerp(c.mat.uniforms.uDim.value, targetDim, TUNE.DIM_EASE);
-
-        if(isSel){
-          // move toward camera in WORLD direction (always correct)
-          c.mesh.getWorldPosition(tmpPos);
-          tmpDir.copy(camera.position).sub(tmpPos).normalize();
-          c.mesh.position.add(tmpDir.multiplyScalar(TUNE.POP_DIST * c.pop));
-          c.mesh.scale.setScalar(1 + 0.10 * c.pop);
-        } else {
-          if(focusActive){
-            c.mesh.getWorldPosition(tmpPos);
-            tmpDir.copy(camera.position).sub(tmpPos).normalize();
-            c.mesh.position.add(tmpDir.multiplyScalar(-TUNE.BACK_DIST * c.mat.uniforms.uDim.value));
-          }
-          c.mesh.scale.setScalar(1);
-        }
-      }
-
-      // Camera parallax
-      camera.position.x = mouseX * 0.18;
-      camera.position.y = 0.15 + (-mouseY) * 0.10;
-      camera.lookAt(0,0,0);
-
-      renderer.render(scene, camera);
-      requestAnimationFrame(tick);
-    }
-
-    window.addEventListener("resize", ()=>{
-      camera.aspect = wrap.clientWidth / wrap.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    });
-
-    tick();
-  </script>
-</body>
-</html>
