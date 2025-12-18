@@ -1,58 +1,59 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>QM Hero 3D</title>
+  <title>QM Hero 3D – Cards Ring</title>
 
   <style>
-    @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Inter+Tight:wght@300;400;500&display=swap");
-
     :root{
-      --card-bg: rgba(0,0,0,.16);
-      --ink: rgba(10,10,10,.82);
-      --muted: rgba(10,10,10,.55);
+      --bg: #ffffff;
+      --card-bg: rgba(0,0,0,0.16);
     }
-
-    html, body {
-      height: 100%;
-      margin: 0;
-      background: transparent;
-      overflow: hidden;
-    }
+    html,body{ height:100%; margin:0; background:var(--bg); overflow:hidden; }
 
     #wrap{
-      position: relative;
-      width: 100%;
-      height: 100%;
-      background: transparent;
+      position:relative;
+      width:100vw; height:100vh;
+      overflow:hidden;
+      background:var(--bg);
     }
 
+    /* Make sure the canvas fills the viewport and stays behind overlays */
     canvas{
+      position:absolute;
+      inset:0;
       display:block;
-      width:100%;
-      height:100%;
+      z-index:1;
     }
 
-    /* jemný grain overlay (Milla Nova vibe) */
     #grain{
+      position:absolute;
+      inset:0;
       pointer-events:none;
-      position:absolute; inset:0;
-      opacity:.16;
+      z-index:2;
       mix-blend-mode:multiply;
-      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
-      background-size: 260px 260px;
+      opacity:.18;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(0,0,0,.10), transparent 55%),
+        radial-gradient(circle at 80% 30%, rgba(0,0,0,.06), transparent 60%),
+        radial-gradient(circle at 50% 80%, rgba(0,0,0,.08), transparent 55%);
+      filter: blur(20px);
     }
 
-    /* volitelný micro hint (můžeš smazat) */
     #hint{
-      position:absolute; left:24px; top:18px;
-      font: 12px/1.4 "Inter Tight", system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: rgba(0,0,0,.45);
-      letter-spacing:.02em;
+      position:absolute;
+      top:14px; left:14px;
+      z-index:3;
+      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:#0b0b0b;
+      opacity:.55;
       user-select:none;
       pointer-events:none;
     }
+
+    /* Optional: debug border to confirm full-screen */
+    /* #wrap{ outline:1px solid red; } */
   </style>
 </head>
 
@@ -63,160 +64,80 @@
   </div>
 
   <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js";
 
-    // ---------- Renderer ----------
+    // -----------------------------
+    // Scene / Camera / Renderer
+    // -----------------------------
     const wrap = document.getElementById("wrap");
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(48, wrap.clientWidth / wrap.clientHeight, 0.1, 80);
+    camera.position.set(0, 0.15, 7.2); // closer & wider than before
+
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
     wrap.appendChild(renderer.domElement);
 
-    // ---------- Scene / Camera ----------
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, wrap.clientWidth/wrap.clientHeight, 0.1, 200);
-    camera.position.set(0, 0.2, 9.5);
+    // Light (subtle)
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x111111, 0.85);
+    scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.55);
+    dir.position.set(2, 3, 4);
+    scene.add(dir);
 
-    // Lights (soft, editorial)
-    const key = new THREE.DirectionalLight(0xffffff, 1.05);
-    key.position.set(4, 6, 6);
-    scene.add(key);
-
-    const fill = new THREE.DirectionalLight(0xffffff, 0.55);
-    fill.position.set(-6, 2, 4);
-    scene.add(fill);
-
-    const amb = new THREE.AmbientLight(0xffffff, 0.55);
-    scene.add(amb);
-
-    // ---------- Data ----------
-    const items = [
-      { title:"Card 1", body:"Placeholder content. Replace later." },
-      { title:"Card 2", body:"Placeholder content. Replace later." },
-      { title:"Card 3", body:"Placeholder content. Replace later." },
-      { title:"Card 4", body:"Placeholder content. Replace later." },
-      { title:"Card 5", body:"Placeholder content. Replace later." },
-      { title:"Card 6", body:"Placeholder content. Replace later." },
-      { title:"Card 7", body:"Placeholder content. Replace later." }
-    ];
-
-    // ---------- Helpers ----------
-    function makeCardTexture({title, body}, w=900, h=1200){
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
-      const g = c.getContext("2d");
-
-      // bg (card-bg)
-      g.clearRect(0,0,w,h);
-      g.fillStyle = "rgba(0,0,0,0.16)";
-      roundRect(g, 0,0,w,h, 44);
-      g.fill();
-
-      // inner "paper" panel
-      g.fillStyle = "rgba(255,255,255,0.48)";
-      roundRect(g, 40,40,w-80,h-80, 34);
-      g.fill();
-
-      // type
-      g.fillStyle = "rgba(0,0,0,0.80)";
-      g.font = "600 72px 'Space Grotesk', sans-serif";
-      g.fillText(title, 86, 150);
-
-      g.fillStyle = "rgba(0,0,0,0.55)";
-      g.font = "400 34px 'Inter Tight', sans-serif";
-      wrapText(g, body, 86, 220, w-172, 46);
-
-      // tiny footer
-      g.fillStyle = "rgba(0,0,0,0.35)";
-      g.font = "400 22px 'Inter Tight', sans-serif";
-      g.fillText("QuietModule • 3D hero", 86, h-88);
-
-      const tex = new THREE.CanvasTexture(c);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      tex.needsUpdate = true;
-      return tex;
-    }
-
-    function roundRect(ctx, x,y,w,h,r){
-      const rr = Math.min(r, w/2, h/2);
-      ctx.beginPath();
-      ctx.moveTo(x+rr,y);
-      ctx.arcTo(x+w,y, x+w,y+h, rr);
-      ctx.arcTo(x+w,y+h, x,y+h, rr);
-      ctx.arcTo(x,y+h, x,y, rr);
-      ctx.arcTo(x,y, x+w,y, rr);
-      ctx.closePath();
-    }
-
-    function wrapText(ctx, text, x, y, maxWidth, lineHeight){
-      const words = text.split(" ");
-      let line = "";
-      for(let n=0;n<words.length;n++){
-        const testLine = line + words[n] + " ";
-        const metrics = ctx.measureText(testLine);
-        if(metrics.width > maxWidth && n>0){
-          ctx.fillText(line, x, y);
-          line = words[n] + " ";
-          y += lineHeight;
-        } else {
-          line = testLine;
-        }
-      }
-      ctx.fillText(line, x, y);
-    }
-
-    // ---------- "Paper bend" Shader Material ----------
-    // deformace podle:
-    // - uBend (spring) + uHover (mouse proximity)
-    const vertex = `
+    // -----------------------------
+    // Shaders (paper bend)
+    // -----------------------------
+    const vertex = /* glsl */`
       varying vec2 vUv;
       uniform float uTime;
-      uniform float uBend;   // hlavní "papír" ohyb
-      uniform float uHover;  // jemná reakce na myš
+      uniform float uBend;
+      uniform float uHover;
 
       void main(){
         vUv = uv;
 
         vec3 p = position;
 
-        // bend around Y: více u pravé hrany (uv.x -> 1)
-        float edge = smoothstep(0.15, 1.0, vUv.x);
-        float bend = uBend * edge;
+        // Paper-bend: curve along X, stronger on hover
+        float bend = uBend + uHover * 0.55;
+        float k = (p.x) * 0.55;
+        p.z += sin(k) * bend;
 
-        // "paper curl": sin vlna přes šířku
-        p.z += sin(vUv.x * 3.14159) * bend;
-
-        // jemná "twist" variace (aby to nebyla plastová deska)
-        p.z += (sin((vUv.y + uTime*0.15) * 8.0) * 0.02) * (uHover);
-
-        // mikro parallax v rámci karty
-        p.x += (vUv.y - 0.5) * 0.12 * uHover;
+        // tiny breathing to avoid "dead" look
+        p.z += sin(uTime * 0.6 + p.y * 1.8) * 0.003;
 
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }
     `;
 
-    const fragment = `
+    const fragment = /* glsl */`
       varying vec2 vUv;
       uniform sampler2D uMap;
 
       void main(){
-        vec4 c = texture2D(uMap, vUv);
-        // jemné "papírové" zesvětlení nahoře
-        float top = smoothstep(0.0, 1.0, vUv.y);
-        c.rgb += 0.06 * top;
-        gl_FragColor = c;
+        vec4 tex = texture2D(uMap, vUv);
+
+        // If texture has transparency, keep it. Otherwise show full plane.
+        // Slightly lift contrast to feel like "paper".
+        vec3 col = tex.rgb;
+        col = pow(col, vec3(0.95));
+
+        gl_FragColor = vec4(col, tex.a);
       }
     `;
 
     function makePaperMaterial(map){
       return new THREE.ShaderMaterial({
         transparent: true,
+        side: THREE.DoubleSide,     // IMPORTANT: prevent "missing half ring"
         uniforms:{
           uTime:{ value:0 },
-          uBend:{ value:0.0 },
+          uBend:{ value:0.22 },
           uHover:{ value:0.0 },
           uMap:{ value: map }
         },
@@ -225,121 +146,157 @@
       });
     }
 
-    // ---------- Cards Ring ----------
+    // -----------------------------
+    // Cards ring
+    // -----------------------------
     const group = new THREE.Group();
     scene.add(group);
 
-    const R = 6.2;                 // radius kruhu
-    const cardW = 3.0;
-    const cardH = 4.0;
-    const segX = 28;               // více segmentů = "papír"
-    const segY = 36;
+    const CARD_W = 2.05;
+    const CARD_H = 2.80;
+    const SEG_X = 36;
+    const SEG_Y = 18;
 
-    const geom = new THREE.PlaneGeometry(cardW, cardH, segX, segY);
+    const N = 10;
+    const R = 3.85; // smaller so it fits camera frustum reliably
+
+    function makeCardTexture(label){
+      const c = document.createElement("canvas");
+      c.width = 900; c.height = 1200;
+      const g = c.getContext("2d");
+
+      // background (your requested vibe)
+      g.fillStyle = "rgba(0,0,0,0.16)";
+      g.fillRect(0,0,c.width,c.height);
+
+      // soft highlight
+      const grd = g.createRadialGradient(250,220,40, 260,260,700);
+      grd.addColorStop(0,"rgba(255,255,255,0.18)");
+      grd.addColorStop(1,"rgba(255,255,255,0.00)");
+      g.fillStyle = grd;
+      g.fillRect(0,0,c.width,c.height);
+
+      // border
+      g.strokeStyle = "rgba(255,255,255,0.22)";
+      g.lineWidth = 6;
+      g.strokeRect(40,40,c.width-80,c.height-80);
+
+      // label
+      g.fillStyle = "rgba(15,15,15,0.88)";
+      g.font = "700 82px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      g.fillText(label, 90, 160);
+
+      // subtext
+      g.fillStyle = "rgba(15,15,15,0.55)";
+      g.font = "500 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      g.fillText("QM card", 90, 235);
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      tex.needsUpdate = true;
+      return tex;
+    }
 
     const cards = [];
-    const N = items.length;
-
     for(let i=0;i<N;i++){
-      const theta = (i / N) * Math.PI * 2;
-
-      const tex = makeCardTexture(items[i]);
+      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEG_X, SEG_Y);
+      const tex = makeCardTexture(`Card ${i+1}`);
       const mat = makePaperMaterial(tex);
+      const mesh = new THREE.Mesh(geo, mat);
 
-      const mesh = new THREE.Mesh(geom, mat);
+      const theta = i * (Math.PI * 2 / N);
+      mesh.position.set(Math.cos(theta) * R, 0, Math.sin(theta) * R);
 
-      // pozice na kruhu
-      mesh.position.set(Math.sin(theta)*R, 0, Math.cos(theta)*R);
-
-      // otočení tak, aby karta "koukala ven" z kruhu
-      mesh.rotation.y = theta;
-
-      // mírné natočení (editorial feel)
-      mesh.rotation.z = (Math.sin(theta)*0.06);
+      // IMPORTANT: face the center (or outward) consistently
+      // This makes the "front" predictable and avoids the "inward text" confusion.
+      mesh.lookAt(0, 0, 0);
+      mesh.rotateY(Math.PI); // flip so the "front" is facing camera when on near side
 
       group.add(mesh);
-      cards.push(mesh);
+
+      cards.push({
+        mesh,
+        mat,
+        theta,
+        hover: 0
+      });
     }
 
-    // ---------- Interaction (NO drag) ----------
-    const mouse = new THREE.Vector2(0,0);
-    let targetRot = 0;
-    let rot = 0;
+    // -----------------------------
+    // Interaction: smooth "ring follow" + hover-ish bend
+    // -----------------------------
+    let targetRotY = 0;
+    let rotY = 0;
 
-    // spring pro bend (pseudo-fyzika)
-    let bend = 0;
-    let bendV = 0;
+    let mouseX = 0, mouseY = 0;
+    window.addEventListener("mousemove", (e)=>{
+      mouseX = (e.clientX / window.innerWidth) * 2 - 1; // -1..1
+      mouseY = (e.clientY / window.innerHeight) * 2 - 1; // -1..1
 
-    // hover spring
-    let hover = 0;
-    let hoverV = 0;
-
-    function onMove(e){
-      const r = wrap.getBoundingClientRect();
-      const mx = ( (e.clientX - r.left) / r.width ) * 2 - 1;
-      const my = ( (e.clientY - r.top) / r.height ) * 2 - 1;
-      mouse.set(mx, -my);
-
-      // rotace prstencem: jemná, ne přestřelená
-      targetRot = -mx * 0.85;
-
-      // bend target: závisí na rychlosti / pozici
-      const bendTarget = Math.abs(mx) * 0.42;
-      // jednoduchý spring: (k - damping)
-      const k = 0.08, d = 0.78;
-      bendV = bendV * d + (bendTarget - bend) * k;
-      bend += bendV;
-
-      // hover target (pro jemné twichy)
-      const hoverTarget = Math.min(1.0, Math.abs(my) + Math.abs(mx)) * 0.6;
-      const hk = 0.07, hd = 0.80;
-      hoverV = hoverV * hd + (hoverTarget - hover) * hk;
-      hover += hoverV;
-    }
-
-    window.addEventListener("mousemove", onMove, { passive:true });
-
-    // Touch (mobile): mapuj na move
-    window.addEventListener("touchmove", (e)=>{
-      if(!e.touches?.length) return;
-      onMove(e.touches[0]);
+      // Rotate ring by mouse X
+      targetRotY = mouseX * 0.55;
     }, { passive:true });
 
-    // ---------- Animate ----------
+    // simple raycaster hover (optional but useful)
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+
+    function updateHover(){
+      ndc.x = mouseX;
+      ndc.y = -mouseY;
+
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(cards.map(c=>c.mesh), false);
+
+      // decay all
+      for(const c of cards) c.hover *= 0.90;
+
+      if(hits.length){
+        const hit = hits[0].object;
+        const c = cards.find(x=>x.mesh === hit);
+        if(c) c.hover = Math.min(1, c.hover + 0.20);
+      }
+    }
+
+    // -----------------------------
+    // Resize
+    // -----------------------------
+    function onResize(){
+      camera.aspect = wrap.clientWidth / wrap.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    }
+    window.addEventListener("resize", onResize);
+
+    // -----------------------------
+    // Animate
+    // -----------------------------
     const clock = new THREE.Clock();
 
     function tick(){
       const t = clock.getElapsedTime();
 
-      // inertia pro rotaci (plynulost)
-      rot += (targetRot - rot) * 0.045;
-      group.rotation.y = rot;
+      // smooth rotation (inertia-ish)
+      rotY += (targetRotY - rotY) * 0.06;
+      group.rotation.y = rotY;
 
-      // camera parallax (Milla vibe)
-      camera.position.x += (mouse.x * 0.55 - camera.position.x) * 0.05;
-      camera.position.y += (mouse.y * 0.28 - camera.position.y) * 0.05;
-      camera.lookAt(0, 0.0, 0);
+      updateHover();
 
-      // update shader uniforms
-      for(const m of cards){
-        m.material.uniforms.uTime.value = t;
-        m.material.uniforms.uBend.value = bend;
-        m.material.uniforms.uHover.value = hover;
+      // per-card paper bend
+      for(const c of cards){
+        c.mat.uniforms.uTime.value = t;
+        c.mat.uniforms.uHover.value = c.hover;
       }
+
+      // subtle camera parallax
+      camera.position.x = mouseX * 0.18;
+      camera.position.y = 0.15 + (-mouseY) * 0.10;
+      camera.lookAt(0, 0, 0);
 
       renderer.render(scene, camera);
       requestAnimationFrame(tick);
     }
     tick();
-
-    // ---------- Resize ----------
-    const ro = new ResizeObserver(()=>{
-      const w = wrap.clientWidth, h = wrap.clientHeight;
-      renderer.setSize(w,h);
-      camera.aspect = w/h;
-      camera.updateProjectionMatrix();
-    });
-    ro.observe(wrap);
   </script>
 </body>
 </html>
