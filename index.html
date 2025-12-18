@@ -9,78 +9,99 @@
     html,body{height:100%;margin:0;overflow:hidden;background:#fff}
     #wrap{position:relative;width:100vw;height:100vh;overflow:hidden;background:#fff}
     canvas{position:absolute;inset:0;display:block;z-index:1}
+
     #hint{
       position:absolute; top:14px; left:14px; z-index:3;
       font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
       color:#0b0b0b; opacity:.55; user-select:none; pointer-events:none;
     }
+
+    /* Overlay only active when focused */
+    #overlay{
+      position:absolute; inset:0; z-index:2;
+      background:transparent;
+      display:none;
+      cursor:default;
+    }
+    #overlay.active{display:block;}
   </style>
 </head>
 
 <body>
   <div id="wrap">
-    <div id="hint">Move mouse • Edge rotate • Click any card → Center → Pop • Smooth return</div>
+    <div id="hint">Move mouse • Edge rotate • Click front card → Center → Settle → Pop • Click outside → Return</div>
+    <div id="overlay"></div>
   </div>
 
   <script type="module">
     import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js";
 
     // -----------------------------
-    // Utils
+    // Utils / defs
     // -----------------------------
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
     const lerp  = (a,b,t)=>a+(b-a)*t;
     const angNorm = (a)=>Math.atan2(Math.sin(a), Math.cos(a)); // [-pi,pi]
+    const expSmoothing = (lambda, dt)=> (1 - Math.exp(-lambda * dt));
 
-    // time-based smoothing (frame-rate independent)
-    function expSmoothing(lambda, dt){
-      // returns t in [0..1] for lerp
-      return 1 - Math.exp(-lambda * dt);
-    }
+    // Terms:
+    // - "detach": vybranou kartu vytrhneme z ring group a dáme do scene, aby ring mohl couvnout bez karty.
+    // - "CENTER": otočení ringu tak, aby vybraná karta byla přesně uprostřed (heading 0).
+    // - "WAIT": krátký settle delay po centrování (aby to nebyl flash).
+    // - "POP": karta vyjede k uživateli, ring couvá dozadu a ostatní se utlumí.
 
     // -----------------------------
     // Tunables (feel)
     // -----------------------------
     const T = {
-      // Edge rotate
-      DEAD: 0.25,
+      // Edge rotate (FREE)
+      DEAD: 0.23,
       EDGE: 0.68,
-      MAX_VEL: 0.055,         // faster
-      VEL_LAMBDA: 14,         // responsiveness
+      MAX_VEL: 0.075,     // faster
+      VEL_LAMBDA: 16,
       DAMP: 0.86,
 
-      // Centering spring (fast but not flash)
-      CENTER_K: 0.095,
-      CENTER_DAMP: 0.78,
+      // Centering (CENTER)
+      CENTER_K: 0.115,
+      CENTER_DAMP: 0.76,
       CENTER_DONE_ANG: 0.006,
       CENTER_DONE_VEL: 0.002,
 
-      // Pop / return smooth
-      POP_DIST: 1.15,
-      POP_LAMBDA: 10,         // smooth in/out
-      DIM_LAMBDA: 10,
-      BACK_DIST: 0.55,        // push others back more
+      // Wait after center
+      POP_DELAY_MS: 180,
 
-      // Ring retreat on focus
-      RING_RETREAT_Z: -2.4,   // move ring away from camera
+      // Pop/return
+      POP_DIST: 1.20,
+      POP_LAMBDA: 10,
+
+      // Dim & push back others
+      DIM_LAMBDA: 12,
+      BACK_DIST: 0.70,
+
+      // Ring retreat on focus (not affecting detached card)
+      RING_RETREAT_Z: -2.65,
       RING_SCALE: 0.86,
+      FOCUS_LAMBDA: 10,
 
       // Tilt
       TILT_MAX: 0.20,
       TILT_LAMBDA: 10,
 
-      // Hover-off cancel grace
-      HOVER_CANCEL_MS: 140
+      // Click gating (front-only click)
+      FRONT_Z_THRESHOLD: 0.25, // camera-space z: > threshold means fairly front
+      FRONT_PICK_PX_RADIUS: 999999, // keep huge (raycaster already chooses nearest)
     };
 
     // -----------------------------
     // Scene
     // -----------------------------
     const wrap = document.getElementById("wrap");
+    const overlay = document.getElementById("overlay");
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
-    const camera = new THREE.PerspectiveCamera(48, wrap.clientWidth / wrap.clientHeight, 0.1, 80);
+    const camera = new THREE.PerspectiveCamera(48, wrap.clientWidth / wrap.clientHeight, 0.1, 120);
     camera.position.set(0, 0.15, 7.2);
 
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
@@ -120,7 +141,7 @@
       void main(){
         vec4 tex = texture2D(uMap, vUv);
         vec3 col = tex.rgb;
-        col = mix(col, col * 0.22, uDim);   // stronger dim
+        col = mix(col, col * 0.18, uDim);   // strong dim
         gl_FragColor = vec4(col, 1.0);
       }
     `;
@@ -157,19 +178,23 @@
       c.width = 900; c.height = 1200;
       const g = c.getContext("2d");
 
+      // base
       g.fillStyle = "rgba(0,0,0,0.16)";
       g.fillRect(0,0,c.width,c.height);
 
-      const grd = g.createRadialGradient(250,220,40, 260,260,700);
+      // radial highlight
+      const grd = g.createRadialGradient(260,240,40, 280,280,720);
       grd.addColorStop(0,"rgba(255,255,255,0.18)");
       grd.addColorStop(1,"rgba(255,255,255,0.00)");
       g.fillStyle = grd;
       g.fillRect(0,0,c.width,c.height);
 
+      // border
       g.strokeStyle = "rgba(255,255,255,0.22)";
       g.lineWidth = 6;
       g.strokeRect(40,40,c.width-80,c.height-80);
 
+      // text (placeholder; you’ll later swap for QM font stack)
       g.fillStyle = "rgba(15,15,15,0.88)";
       g.font = "700 82px system-ui, -apple-system, Segoe UI, Roboto, Arial";
       g.fillText(label, 90, 160);
@@ -193,7 +218,7 @@
 
       const theta = i * (Math.PI * 2 / N);
 
-      // slight alternating tilt like your vibe
+      // alternating micro-tilt vibe
       const alt = (i % 2 === 0) ? 1 : -1;
       mesh.rotation.z = alt * 0.03;
 
@@ -206,7 +231,7 @@
     }
 
     // -----------------------------
-    // Input
+    // Input + Raycast
     // -----------------------------
     let mouseX = 0, mouseY = 0;
     window.addEventListener("mousemove",(e)=>{
@@ -236,63 +261,129 @@
       return idx >= 0 ? idx : null;
     }
 
+    // "front-only" gating: card must be sufficiently front in camera-space
+    const _camSpace = new THREE.Vector3();
+    function isFrontEnough(mesh){
+      mesh.updateMatrixWorld(true);
+      _camSpace.copy(mesh.getWorldPosition(new THREE.Vector3())).applyMatrix4(camera.matrixWorldInverse);
+      // in camera space, objects in front have negative z (because camera looks down -Z).
+      // We'll convert to "frontness" by using -z (bigger is more front).
+      const frontness = -_camSpace.z;
+      return frontness > T.FRONT_Z_THRESHOLD;
+    }
+
     // -----------------------------
     // Rotation + State machine
     // -----------------------------
     let rotY = 0;
     let rotVel = 0;
 
-    // FREE -> CENTERING -> FOCUSED -> UNFOCUS -> FREE
+    // FREE -> CENTERING -> WAIT -> FOCUSED -> UNFOCUS -> FREE
     let state = "FREE";
     let selected = null;
     let focusTargetRotY = 0;
 
-    // 0..1 focus amount for ring retreat / dim / etc.
+    // focus amount 0..1 (for ring retreat/dim intensity)
     let focusAmt = 0;
 
-    let hoverOffSince = null;
+    // detach handling
+    let detached = null; // { mesh, index }
+    const _wPos = new THREE.Vector3();
+    const _wQuat = new THREE.Quaternion();
+    const _wScale = new THREE.Vector3();
+    const _tmpPos = new THREE.Vector3();
+    const _tmpDir = new THREE.Vector3();
 
     function cardCenterError(i){
+      // when group rotation is rotY, card i heading relative to camera center is theta+rotY
       return angNorm(cards[i].theta + rotY); // want 0
     }
     function computeTargetRotY(i){
       const err = cardCenterError(i);
       return rotY - err;
     }
+
+    function setOverlayActive(on){
+      overlay.classList.toggle("active", !!on);
+    }
+
+    function detachSelectedToScene(i){
+      if(detached) return;
+      const mesh = cards[i].mesh;
+
+      mesh.updateMatrixWorld(true);
+      mesh.getWorldPosition(_wPos);
+      mesh.getWorldQuaternion(_wQuat);
+      mesh.getWorldScale(_wScale);
+
+      group.remove(mesh);
+      scene.add(mesh);
+
+      mesh.position.copy(_wPos);
+      mesh.quaternion.copy(_wQuat);
+      mesh.scale.copy(_wScale);
+
+      detached = { mesh, index: i };
+    }
+
+    function attachSelectedBackToRing(){
+      if(!detached) return;
+      const i = detached.index;
+      const mesh = detached.mesh;
+
+      scene.remove(mesh);
+      group.add(mesh);
+
+      // reset local state; ring loop will place it properly next frame
+      mesh.position.set(0,0,0);
+      mesh.rotation.set(0,0,0);
+      mesh.scale.set(1,1,1);
+
+      detached = null;
+    }
+
     function startCenterTo(i){
       selected = i;
       focusTargetRotY = computeTargetRotY(i);
       state = "CENTERING";
+      setOverlayActive(true);
     }
+
     function startUnfocus(){
       if(state === "UNFOCUS" || state === "FREE") return;
       state = "UNFOCUS";
-    }
-    function cancelToFree(){
-      state = "FREE";
-      selected = null;
-      hoverOffSince = null;
+      // overlay stays until we fully return
     }
 
-    // Click: ALWAYS center to the clicked card (reliable raycast from the click)
+    function resetToFree(){
+      state = "FREE";
+      selected = null;
+      rotVel = 0;
+      setOverlayActive(false);
+    }
+
+    // overlay click = always unfocus (reliable)
+    overlay.addEventListener("click", (e)=>{
+      e.preventDefault();
+      startUnfocus();
+    });
+
+    // click: pick only front cards; always center -> wait -> pop
     window.addEventListener("click", (e)=>{
+      // if overlay active, it will catch clicks; but we still guard:
+      if(overlay.classList.contains("active")) return;
+
       const hits = raycastAtClientXY(e.clientX, e.clientY);
       if(!hits.length){
-        startUnfocus();
+        // no pick = nothing (in FREE)
         return;
       }
       const obj = hits[0].object;
       const idx = cards.findIndex(c=>c.mesh===obj);
-      if(idx < 0){
-        startUnfocus();
-        return;
-      }
+      if(idx < 0) return;
 
-      // if already focused on this card -> toggle out
-      if(selected === idx && (state === "FOCUSED" || state === "CENTERING")){
-        startUnfocus();
-        return;
-      }
+      // front-only gating
+      if(!isFrontEnough(cards[idx].mesh)) return;
 
       startCenterTo(idx);
     });
@@ -301,14 +392,13 @@
     // Animate
     // -----------------------------
     const clock = new THREE.Clock();
-    const tmpPos = new THREE.Vector3();
-    const tmpDir = new THREE.Vector3();
+    let waitStart = 0;
 
     function tick(){
       const dt = Math.min(clock.getDelta(), 0.033);
       const t  = clock.elapsedTime;
 
-      // tilt
+      // tilt (up/down)
       const tiltX = clamp(-mouseY * T.TILT_MAX, -T.TILT_MAX, T.TILT_MAX);
       group.rotation.x = lerp(group.rotation.x, tiltX, expSmoothing(T.TILT_LAMBDA, dt));
 
@@ -321,25 +411,33 @@
         cards[i].mat.uniforms.uHover.value = cards[i].hover;
       }
 
-      // smooth focus amount
-      const wantFocus = (state === "FOCUSED" || state === "CENTERING") ? 1 : 0;
-      if(state === "UNFOCUS") {
-        // during unfocus we ramp down focusAmt
-        focusAmt = lerp(focusAmt, 0, expSmoothing(8, dt));
+      // focusAmt ramp
+      const wantsFocus = (state === "CENTERING" || state === "WAIT" || state === "FOCUSED") ? 1 : 0;
+      const focusT = expSmoothing(T.FOCUS_LAMBDA, dt);
+
+      if(state === "UNFOCUS"){
+        focusAmt = lerp(focusAmt, 0, focusT);
         if(focusAmt < 0.02){
+          // finish return
+          attachSelectedBackToRing();
+          // clear dim & pop quickly
+          for(let i=0;i<N;i++){
+            cards[i].mat.uniforms.uDim.value = 0;
+            cards[i].pop = 0;
+          }
           focusAmt = 0;
-          cancelToFree();
+          resetToFree();
         }
       } else {
-        focusAmt = lerp(focusAmt, wantFocus, expSmoothing(8, dt));
+        focusAmt = lerp(focusAmt, wantsFocus, focusT);
       }
 
-      // ring retreat (almost disappears)
+      // ring retreat (only group)
       group.position.z = lerp(0, T.RING_RETREAT_Z, focusAmt);
       const s = lerp(1, T.RING_SCALE, focusAmt);
       group.scale.set(s,s,s);
 
-      // rotation
+      // FREE rotation by edge zones
       if(state === "FREE"){
         const ax = Math.abs(mouseX);
         const sign = (mouseX < 0) ? -1 : 1;
@@ -362,7 +460,8 @@
         rotY += rotVel;
       }
 
-      if(state === "CENTERING"){
+      // CENTERING: rotate ring to bring selected to center
+      if(state === "CENTERING" && selected !== null){
         const err = angNorm(focusTargetRotY - rotY);
         rotVel = rotVel * T.CENTER_DAMP + err * T.CENTER_K;
         rotY += rotVel;
@@ -370,82 +469,108 @@
         if(Math.abs(err) < T.CENTER_DONE_ANG && Math.abs(rotVel) < T.CENTER_DONE_VEL){
           rotY = focusTargetRotY;
           rotVel = 0;
+
+          // detach now so ring can move without selected
+          detachSelectedToScene(selected);
+
+          // settle wait
+          waitStart = performance.now();
+          state = "WAIT";
+        }
+      }
+
+      // WAIT: hold center, no pop yet
+      if(state === "WAIT" && selected !== null){
+        const err = angNorm(focusTargetRotY - rotY);
+        rotY += err * 0.12;
+
+        if(performance.now() - waitStart >= T.POP_DELAY_MS){
           state = "FOCUSED";
         }
       }
 
-      if(state === "FOCUSED"){
-        // keep centered
+      // FOCUSED: keep micro-centering only
+      if(state === "FOCUSED" && selected !== null){
         const err = angNorm(focusTargetRotY - rotY);
         rotY += err * 0.10;
         rotVel *= 0.6;
       }
 
+      // UNFOCUS: no auto-free rotation; just keep stable while returning
       if(state === "UNFOCUS"){
-        // allow gentle drift back to FREE rotation, but we actually switch to FREE at end
         rotVel *= 0.85;
         rotY += rotVel;
       }
 
       group.rotation.y = rotY;
 
-      // hover-off cancel (BUT SMOOTH)
-      if(selected !== null && state === "FOCUSED"){
-        if(hIdx !== selected){
-          if(hoverOffSince === null) hoverOffSince = performance.now();
-          const ms = performance.now() - hoverOffSince;
-          if(ms > T.HOVER_CANCEL_MS) startUnfocus();
-        } else {
-          hoverOffSince = null;
-        }
-      } else {
-        hoverOffSince = null;
-      }
-
-      // cards transform
-      const popT = expSmoothing(T.POP_LAMBDA, dt);
-      const dimT = expSmoothing(T.DIM_LAMBDA, dt);
-
-      for(let i=0;i<N;i++){
-        const c = cards[i];
-        const isSel = (selected === i);
-
-        // base ring position
-        const th = c.theta;
-        const alt = (i % 2 === 0) ? 1 : -1;
-        c.mesh.position.set(Math.cos(th) * R, alt * 0.06, Math.sin(th) * R);
-
-        c.mesh.lookAt(0,0,0);
-        c.mesh.rotateY(Math.PI);
-
-        // POP only after CENTERING finished (FOCUSED)
-        const targetPop = (isSel && state === "FOCUSED") ? 1 : 0;
-        c.pop = lerp(c.pop, targetPop, popT);
-
-        // dim others when centering or focused
-        const focusActive = (selected !== null && (state === "CENTERING" || state === "FOCUSED"));
-        const targetDim = (focusActive && !isSel) ? 1 : 0;
-        c.mat.uniforms.uDim.value = lerp(c.mat.uniforms.uDim.value, targetDim, dimT);
-
-        if(isSel){
-          c.mesh.getWorldPosition(tmpPos);
-          tmpDir.copy(camera.position).sub(tmpPos).normalize();
-          c.mesh.position.add(tmpDir.multiplyScalar(T.POP_DIST * c.pop));
-          c.mesh.scale.setScalar(1 + 0.10 * c.pop);
-        } else {
-          if(focusActive){
-            c.mesh.getWorldPosition(tmpPos);
-            tmpDir.copy(camera.position).sub(tmpPos).normalize();
-            c.mesh.position.add(tmpDir.multiplyScalar(-T.BACK_DIST * c.mat.uniforms.uDim.value));
-          }
-          c.mesh.scale.setScalar(1);
-        }
-      }
-
       // camera parallax
       camera.position.x = mouseX * 0.18;
       camera.position.y = 0.15 + (-mouseY) * 0.10;
       camera.lookAt(0,0,0);
+
+      // -----------------------------
+      // Cards placement
+      // -----------------------------
+      const popT = expSmoothing(T.POP_LAMBDA, dt);
+      const dimT = expSmoothing(T.DIM_LAMBDA, dt);
+
+      const focusActive = (selected !== null && (state === "CENTERING" || state === "WAIT" || state === "FOCUSED"));
+      const isDetachedSelected = (detached && selected !== null && detached.index === selected);
+
+      for(let i=0;i<N;i++){
+        const c = cards[i];
+        const mesh = c.mesh;
+        const isSel = (selected === i);
+
+        // --- default ring positioning ONLY if not detached selected
+        if(!(isDetachedSelected && isSel)){
+          const th = c.theta;
+          const alt = (i % 2 === 0) ? 1 : -1;
+          mesh.position.set(Math.cos(th) * R, alt * 0.06, Math.sin(th) * R);
+          mesh.lookAt(0,0,0);
+          mesh.rotateY(Math.PI);
+
+          // small alternating z-tilt remains
+          // (already set rotation.z initially)
+        }
+
+        // dim others in focus states
+        const targetDim = (focusActive && !isSel) ? 1 : 0;
+        c.mat.uniforms.uDim.value = lerp(c.mat.uniforms.uDim.value, targetDim, dimT);
+
+        // push back others (only while focusActive)
+        if(focusActive && !isSel){
+          mesh.updateMatrixWorld(true);
+          mesh.getWorldPosition(_tmpPos);
+          _tmpDir.copy(camera.position).sub(_tmpPos).normalize();
+          mesh.position.add(_tmpDir.multiplyScalar(-T.BACK_DIST * c.mat.uniforms.uDim.value));
+          mesh.scale.setScalar(1);
+        }
+
+        // selected pop: ONLY when detached AND state=FOCUSED
+        const targetPop = (isDetachedSelected && isSel && state === "FOCUSED") ? 1 : 0;
+        c.pop = lerp(c.pop, targetPop, popT);
+
+        if(isDetachedSelected && isSel){
+          // keep the card "on place" (world) and pop toward camera smoothly
+          mesh.updateMatrixWorld(true);
+          mesh.getWorldPosition(_tmpPos);
+          _tmpDir.copy(camera.position).sub(_tmpPos).normalize();
+
+          // move towards camera by pop amount
+          mesh.position.add(_tmpDir.multiplyScalar(T.POP_DIST * c.pop));
+
+          // slight scale for emphasis
+          mesh.scale.setScalar(1 + 0.10 * c.pop);
+        }
+
+        // when unfocusing, pop goes back smoothly (because targetPop=0)
+        if(isDetachedSelected && isSel && state === "UNFOCUS"){
+          // keep scaling in sync
+          mesh.scale.setScalar(1 + 0.10 * c.pop);
+        }
+      }
 
       renderer.render(scene, camera);
       requestAnimationFrame(tick);
