@@ -2,113 +2,128 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
-    <title>Milla Nova | Infinite Scroll Cylinder</title>
+    <title>Milla Nova | Final Atomic Polish</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.19/bundled/lenis.min.js"></script>
     <style>
-        body { margin: 0; background: #e5e5e5; overflow-x: hidden; height: 500vh; /* Délka scrollu */ }
-        canvas { position: fixed; top: 0; left: 0; outline: none; }
+        body { margin: 0; background: #f4f4f4; overflow-x: hidden; font-family: sans-serif; }
+        canvas { position: fixed; top: 0; left: 0; }
         #explore {
-            position: fixed; width: 110px; height: 110px; background: #9e2a2b;
+            position: fixed; width: 100px; height: 100px; background: #9e2a2b;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            color: white; font-family: sans-serif; font-size: 10px; text-transform: uppercase;
+            color: white; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
             pointer-events: none; z-index: 100; opacity: 0; transform: translate(-50%, -50%) scale(0);
         }
+        .scroll-proxy { height: 1000vh; } /* Simulace dlouhého scrollu */
     </style>
 </head>
 <body>
 
 <div id="explore">Explore</div>
+<div class="scroll-proxy"></div>
 
 <script type="module">
     import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
-    // --- SETUP ---
+    const RADIUS = 14;
+    const CARD_W = 4.8;
+    const CARD_H = 6.5;
+    const COUNT = 12;
+
+    // --- RENDERER SETUP ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xe5e5e5);
-    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 16;
+    scene.background = new THREE.Color(0xf4f4f4);
+    scene.fog = new THREE.Fog(0xf4f4f4, 15, 35);
+
+    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 22);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     document.body.appendChild(renderer.domElement);
 
-    // --- LENIS SMOOTH SCROLL ---
-    const lenis = new Lenis();
+    // --- SHADER (Klíč k ohýbání karet) ---
+    const vertexShader = `
+        uniform float uBend;
+        uniform float uRadius;
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            vec4 pos = vec4(position, 1.0);
+            
+            // Ohnutí plochy do oblouku válce
+            float angle = pos.x / uRadius;
+            float theta = angle * uBend;
+            
+            pos.z += (cos(theta) * uRadius - uRadius);
+            pos.x = sin(theta) * uRadius;
+            
+            gl_Position = projectionMatrix * modelViewMatrix * pos;
+        }
+    `;
+
+    // --- KONSTRUKCE VÁLCE ---
+    const cylinder = new THREE.Group();
+    scene.add(cylinder);
+
+    const cards = [];
+    const texLoader = new THREE.TextureLoader();
+    const geometry = new THREE.PlaneGeometry(CARD_W, CARD_H, 40, 1);
+
+    for (let i = 0; i < COUNT; i++) {
+        const angle = (i / COUNT) * Math.PI * 2;
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: texLoader.load(`https://picsum.photos/800/1200?v=${i}`) },
+                uBend: { value: 1.0 },
+                uRadius: { value: RADIUS },
+                uHover: { value: 0.0 }
+            },
+            vertexShader,
+            fragmentShader: `
+                uniform sampler2D uMap;
+                uniform float uHover;
+                varying vec2 vUv;
+                void main() {
+                    vec4 color = texture2D(uMap, vUv);
+                    gl_FragColor = vec4(color.rgb + (uHover * 0.1), 1.0);
+                }
+            `,
+            side: THREE.DoubleSide
+        });
+
+        const mesh = new THREE.Mesh(geometry, mat);
+        const wrapper = new THREE.Group();
+        
+        // Umístění na kružnici
+        wrapper.position.x = Math.sin(angle) * RADIUS;
+        wrapper.position.z = Math.cos(angle) * RADIUS - RADIUS;
+        wrapper.rotation.y = angle;
+        
+        wrapper.add(mesh);
+        cylinder.add(wrapper);
+        cards.push({ mesh, wrapper, angle });
+    }
+
+    // --- FYZIKA A POHYB (LENIS + GSAP) ---
+    const lenis = new Lenis({ lerp: 0.05 });
+    let scrollRotation = 0;
+
+    lenis.on('scroll', (e) => {
+        // Plynulá rotace založená na scrollu
+        scrollRotation = e.animatedScroll * 0.0005;
+    });
+
     function raf(time) {
         lenis.raf(time);
         requestAnimationFrame(raf);
     }
     requestAnimationFrame(raf);
 
-    // --- CYLINDER GROUP ---
-    const RADIUS = 11;
-    const CARD_COUNT = 12; // Více karet pro zaplnění kruhu
-    const cylinderGroup = new THREE.Group();
-    scene.add(cylinderGroup);
-
-    // --- CURVED SHADER ---
-    const vertexShader = `
-        uniform float uBend;
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            vec3 pos = position;
-            float angle = pos.x / ${RADIUS}.0;
-            pos.z += (cos(angle) * ${RADIUS}.0 - ${RADIUS}.0) * uBend;
-            pos.x = sin(angle) * ${RADIUS}.0;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-        }
-    `;
-
-    const cards = [];
-    const texLoader = new THREE.TextureLoader();
-
-    for (let i = 0; i < CARD_COUNT; i++) {
-        const angle = (i / CARD_COUNT) * Math.PI * 2;
-        
-        const mat = new THREE.ShaderMaterial({
-            uniforms: {
-                uMap: { value: texLoader.load(`https://picsum.photos/600/900?v=${i}`) },
-                uBend: { value: 0.8 },
-                uOpacity: { value: 1.0 }
-            },
-            vertexShader,
-            fragmentShader: `
-                uniform sampler2D uMap;
-                varying vec2 vUv;
-                void main() { gl_FragColor = texture2D(uMap, vUv); }
-            `,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 5.5, 32, 1), mat);
-        
-        const pivot = new THREE.Group();
-        pivot.position.x = Math.sin(angle) * RADIUS;
-        pivot.position.z = Math.cos(angle) * RADIUS - RADIUS;
-        pivot.rotation.y = angle;
-        
-        pivot.add(mesh);
-        cylinderGroup.add(pivot);
-        cards.push({ mesh, pivot, angle });
-    }
-
-    // --- SCROLL TO ROTATION ---
-    lenis.on('scroll', (e) => {
-        // Mapování scrollu na rotaci celého válce
-        gsap.to(cylinderGroup.rotation, {
-            y: e.animatedScroll * 0.002, // Rychlost rotace
-            duration: 0.5
-        });
-    });
-
-    // --- HOVER & PARALLAX ---
-    let mouse = new THREE.Vector2();
-    let parallaxTarget = new THREE.Vector2();
+    // --- INTERAKCE ---
+    const mouse = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
     const explore = document.getElementById('explore');
 
     window.addEventListener('mousemove', (e) => {
@@ -116,28 +131,44 @@
         mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
         
         gsap.to(explore, { x: e.clientX, y: e.clientY, duration: 0.1 });
-        parallaxTarget.set(mouse.x * 0.1, mouse.y * 0.05);
 
-        const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObjects(cards.map(c => c.mesh));
 
         if (intersects.length > 0) {
-            const hit = cards.find(c => c.mesh === intersects[0].object);
-            gsap.to(hit.mesh.position, { z: 2, duration: 0.4 }); // Vysunutí
+            const activeMesh = intersects[0].object;
+            const card = cards.find(c => c.mesh === activeMesh);
+            
+            // HOVER EFEKT: Vysunutí + Narovnání
+            gsap.to(activeMesh.position, { z: 2.5, duration: 0.5, ease: "power2.out" });
+            gsap.to(activeMesh.material.uniforms.uBend, { value: 0.2, duration: 0.5 });
+            gsap.to(activeMesh.material.uniforms.uHover, { value: 1.0, duration: 0.3 });
             gsap.to(explore, { opacity: 1, scale: 1, duration: 0.3 });
         } else {
-            cards.forEach(c => gsap.to(c.mesh.position, { z: 0, duration: 0.4 }));
+            cards.forEach(c => {
+                gsap.to(c.mesh.position, { z: 0, duration: 0.5 });
+                gsap.to(c.mesh.material.uniforms.uBend, { value: 1.0, duration: 0.5 });
+                gsap.to(c.mesh.material.uniforms.uHover, { value: 0.0, duration: 0.3 });
+            });
             gsap.to(explore, { opacity: 0, scale: 0, duration: 0.3 });
         }
     });
 
-    gsap.ticker.add(() => {
-        // Jemný parallax náklon
-        scene.rotation.y += (parallaxTarget.x - scene.rotation.y) * 0.05;
-        scene.rotation.x += (-parallaxTarget.y - scene.rotation.x) * 0.05;
+    // --- LOOP ---
+    function animate() {
+        // Aplikace scroll rotace
+        cylinder.rotation.y = scrollRotation;
+
+        // Micro-parallax podle myši (jemné naklánění scény)
+        const targetTiltX = -mouse.y * 0.05;
+        const targetTiltY = mouse.x * 0.05;
+        scene.rotation.x += (targetTiltX - scene.rotation.x) * 0.05;
+        scene.rotation.y += (targetTiltY - scene.rotation.y) * 0.05;
+
         renderer.render(scene, camera);
-    });
+        requestAnimationFrame(animate);
+    }
+    animate();
 
 </script>
 </body>
