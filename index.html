@@ -3,429 +3,343 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>QM — 3D Carousel</title>
+  <title>QM Hero 3D</title>
 
   <style>
+    @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Inter+Tight:wght@300;400;500&display=swap");
+
     :root{
-      /* QM-ish neutrals + ink accent */
-      --bg0:#fbfbfa;
-      --bg1:#f3f2ef;
-      --ink:#101114;
-      --muted:rgba(16,17,20,.55);
-      --hair:rgba(16,17,20,.10);
-      --accent:#2a3142; /* deep ink blue */
+      --card-bg: rgba(0,0,0,.16);
+      --ink: rgba(10,10,10,.82);
+      --muted: rgba(10,10,10,.55);
     }
 
-    html,body{height:100%;margin:0}
-    body{
-      overflow:hidden;
-      background: radial-gradient(1200px 700px at 50% 40%, var(--bg0), var(--bg1));
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color:var(--ink);
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
     }
 
-    /* Subtle grain */
-    body::before{
-      content:"";
-      position:fixed; inset:0;
+    #wrap{
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+
+    canvas{
+      display:block;
+      width:100%;
+      height:100%;
+    }
+
+    /* jemný grain overlay (Milla Nova vibe) */
+    #grain{
       pointer-events:none;
-      opacity:.10;
-      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+      position:absolute; inset:0;
+      opacity:.16;
       mix-blend-mode:multiply;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+      background-size: 260px 260px;
     }
 
-    #wrap{position:fixed; inset:0}
-    canvas{display:block; width:100%; height:100%}
-
-    /* Overlay UI (Milla vibe layout, QM tone) */
-    .ui{position:fixed; inset:0; pointer-events:none}
-    .ui a, .ui button {pointer-events:auto}
-
-    .top{
-      position:absolute; left:0; right:0; top:22px;
-      display:flex; justify-content:center;
-      letter-spacing:.18em;
-      font-weight:600;
-      color:var(--accent);
-    }
-    .top small{display:block; margin-top:6px; letter-spacing:.22em; font-weight:500; color:var(--muted)}
-    .corner{
-      position:absolute; top:26px;
-      font-size:12px;
-      letter-spacing:.22em;
-      text-transform:uppercase;
-      color:var(--muted);
-    }
-    .corner.left{left:26px}
-    .corner.right{right:26px}
-
-    .bottom-left{
-      position:absolute; left:26px; bottom:18px;
-      font-size:10px; letter-spacing:.22em;
-      text-transform:uppercase;
-      color:rgba(16,17,20,.35);
-    }
-
-    .bottom-right{
-      position:absolute; right:22px; bottom:18px;
-      display:flex; align-items:center; gap:10px;
-      color:var(--muted);
-      font-size:11px;
-      letter-spacing:.18em;
-      text-transform:uppercase;
-    }
-    .toggle{
-      border:1px solid var(--hair);
-      background:rgba(255,255,255,.55);
-      backdrop-filter: blur(10px);
-      border-radius:999px;
-      padding:8px 10px;
-      cursor:pointer;
-    }
-
-    .hint{
-      position:absolute; left:26px; top:64px;
-      font-size:12px;
-      color:rgba(16,17,20,.45);
+    /* volitelný micro hint (můžeš smazat) */
+    #hint{
+      position:absolute; left:24px; top:18px;
+      font: 12px/1.4 "Inter Tight", system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: rgba(0,0,0,.45);
+      letter-spacing:.02em;
+      user-select:none;
       pointer-events:none;
     }
-
-    /* For iframe embed: calmer UI */
-    body.embed .corner,
-    body.embed .bottom-left{display:none}
-    body.embed .top{top:14px; opacity:.85}
   </style>
-
-  <!-- importmap so it works on GitHub Pages without bundling -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-      }
-    }
-  </script>
 </head>
 
 <body>
-  <div id="wrap"></div>
-
-  <div class="ui">
-    <div class="corner left"><a href="#" style="color:inherit;text-decoration:none">ABOUT</a></div>
-    <div class="corner right"><a href="#" style="color:inherit;text-decoration:none">COLLECTION ↗</a></div>
-
-    <div class="top" aria-hidden="true" style="text-align:center">
-      <div>
-        <div style="font-size:22px">QUIET MODULE</div>
-        <small>INTERACTIVE CARDS</small>
-      </div>
-    </div>
-
-    <div class="hint" id="hint">Drag • Hover • Click to focus</div>
-
-    <div class="bottom-left">MADE BY QM</div>
-
-    <div class="bottom-right">
-      <button class="toggle" id="soundBtn" type="button">OFF 🔇</button>
-    </div>
+  <div id="wrap">
+    <div id="hint">Move mouse • Smooth ring • Paper bend</div>
+    <div id="grain"></div>
   </div>
 
   <script type="module">
-    import * as THREE from "three";
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
-    // ---- mode flags (query params) ----
-    const qs = new URLSearchParams(location.search);
-    if (qs.get("embed")==="1") document.body.classList.add("embed");
-
-    // ---- scene ----
+    // ---------- Renderer ----------
     const wrap = document.getElementById("wrap");
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     wrap.appendChild(renderer.domElement);
 
+    // ---------- Scene / Camera ----------
     const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, wrap.clientWidth/wrap.clientHeight, 0.1, 200);
+    camera.position.set(0, 0.2, 9.5);
 
-    // Camera tuned for "catalog" look (not game-y wide)
-    const camera = new THREE.PerspectiveCamera(40, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 0.2, 8.2);
-
-    // Soft light like editorial
-    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 0.65);
-    key.position.set(2, 3, 5);
+    // Lights (soft, editorial)
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(4, 6, 6);
     scene.add(key);
 
-    // ---- helpers ----
-    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-    const lerp = (a,b,t)=>a+(b-a)*t;
+    const fill = new THREE.DirectionalLight(0xffffff, 0.55);
+    fill.position.set(-6, 2, 4);
+    scene.add(fill);
 
-    // ---- card data (replace with your images) ----
-    // TIP: put images into /assets/ and reference: "assets/card1.jpg"
-    const CARDS = [
-      { title:"Card 01", subtitle:"QuietModule • 3D Hero", img:"https://images.unsplash.com/photo-1520975958225-1b0f9f3a3b4f?auto=format&fit=crop&w=1200&q=80" },
-      { title:"Card 02", subtitle:"Replace textures later", img:"https://images.unsplash.com/photo-1520975661595-6453be3f7070?auto=format&fit=crop&w=1200&q=80" },
-      { title:"Card 03", subtitle:"Editorial vibe", img:"https://images.unsplash.com/photo-1520975682031-a7a8e2a32a2b?auto=format&fit=crop&w=1200&q=80" },
-      { title:"Card 04", subtitle:"Paper behavior", img:"https://images.unsplash.com/photo-1520975867597-0f69a9c9ed2a?auto=format&fit=crop&w=1200&q=80" },
-      { title:"Card 05", subtitle:"Infinite ring", img:"https://images.unsplash.com/photo-1520975919090-2e2d6f9a8d54?auto=format&fit=crop&w=1200&q=80" },
-      { title:"Card 06", subtitle:"Click to focus", img:"https://images.unsplash.com/photo-1520975871155-0f1c54d0c3d1?auto=format&fit=crop&w=1200&q=80" }
+    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(amb);
+
+    // ---------- Data ----------
+    const items = [
+      { title:"Card 1", body:"Placeholder content. Replace later." },
+      { title:"Card 2", body:"Placeholder content. Replace later." },
+      { title:"Card 3", body:"Placeholder content. Replace later." },
+      { title:"Card 4", body:"Placeholder content. Replace later." },
+      { title:"Card 5", body:"Placeholder content. Replace later." },
+      { title:"Card 6", body:"Placeholder content. Replace later." },
+      { title:"Card 7", body:"Placeholder content. Replace later." }
     ];
 
-    // ---- geometry / material ----
-    // Higher segments => nicer bend (but keep reasonable)
-    const W = 2.05, H = 2.75;
-    const segX = 36, segY = 48;
-    const baseGeom = new THREE.PlaneGeometry(W, H, segX, segY);
+    // ---------- Helpers ----------
+    function makeCardTexture({title, body}, w=900, h=1200){
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const g = c.getContext("2d");
 
-    const loader = new THREE.TextureLoader();
-    const textures = await Promise.all(CARDS.map(c => new Promise(res=>{
-      loader.load(c.img, t=>{
-        t.colorSpace = THREE.SRGBColorSpace;
-        t.anisotropy = 8;
-        res(t);
-      }, undefined, ()=>res(null));
-    })));
+      // bg (card-bg)
+      g.clearRect(0,0,w,h);
+      g.fillStyle = "rgba(0,0,0,0.16)";
+      roundRect(g, 0,0,w,h, 44);
+      g.fill();
 
-    // Canvas-based "magazine cover" texture (image + typography), if img fails
-    function makeFallbackTexture(i){
-      const cnv = document.createElement("canvas");
-      cnv.width = 1024; cnv.height = 1400;
-      const g = cnv.getContext("2d");
-      g.fillStyle = "#f7f6f3"; g.fillRect(0,0,cnv.width,cnv.height);
-      g.fillStyle = "rgba(16,17,20,.08)"; g.fillRect(80, 260, cnv.width-160, cnv.height-420);
+      // inner "paper" panel
+      g.fillStyle = "rgba(255,255,255,0.48)";
+      roundRect(g, 40,40,w-80,h-80, 34);
+      g.fill();
 
-      g.fillStyle = "#2a3142";
-      g.font = "700 70px system-ui";
-      g.fillText(CARDS[i].title, 90, 140);
+      // type
+      g.fillStyle = "rgba(0,0,0,0.80)";
+      g.font = "600 72px 'Space Grotesk', sans-serif";
+      g.fillText(title, 86, 150);
 
-      g.fillStyle = "rgba(16,17,20,.55)";
-      g.font = "500 30px system-ui";
-      g.fillText(CARDS[i].subtitle, 90, 190);
+      g.fillStyle = "rgba(0,0,0,0.55)";
+      g.font = "400 34px 'Inter Tight', sans-serif";
+      wrapText(g, body, 86, 220, w-172, 46);
 
-      g.fillStyle = "rgba(16,17,20,.35)";
-      g.font = "500 22px system-ui";
-      g.fillText("Replace image later", 90, cnv.height-90);
+      // tiny footer
+      g.fillStyle = "rgba(0,0,0,0.35)";
+      g.font = "400 22px 'Inter Tight', sans-serif";
+      g.fillText("QuietModule • 3D hero", 86, h-88);
 
-      const tex = new THREE.CanvasTexture(cnv);
+      const tex = new THREE.CanvasTexture(c);
       tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      tex.needsUpdate = true;
       return tex;
     }
 
-    function makeMaterial(i){
-      const map = textures[i] || makeFallbackTexture(i);
-      return new THREE.MeshStandardMaterial({
-        map,
-        roughness: 0.9,
-        metalness: 0.0,
-        transparent: true
+    function roundRect(ctx, x,y,w,h,r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr,y);
+      ctx.arcTo(x+w,y, x+w,y+h, rr);
+      ctx.arcTo(x+w,y+h, x,y+h, rr);
+      ctx.arcTo(x,y+h, x,y, rr);
+      ctx.arcTo(x,y, x+w,y, rr);
+      ctx.closePath();
+    }
+
+    function wrapText(ctx, text, x, y, maxWidth, lineHeight){
+      const words = text.split(" ");
+      let line = "";
+      for(let n=0;n<words.length;n++){
+        const testLine = line + words[n] + " ";
+        const metrics = ctx.measureText(testLine);
+        if(metrics.width > maxWidth && n>0){
+          ctx.fillText(line, x, y);
+          line = words[n] + " ";
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, x, y);
+    }
+
+    // ---------- "Paper bend" Shader Material ----------
+    // deformace podle:
+    // - uBend (spring) + uHover (mouse proximity)
+    const vertex = `
+      varying vec2 vUv;
+      uniform float uTime;
+      uniform float uBend;   // hlavní "papír" ohyb
+      uniform float uHover;  // jemná reakce na myš
+
+      void main(){
+        vUv = uv;
+
+        vec3 p = position;
+
+        // bend around Y: více u pravé hrany (uv.x -> 1)
+        float edge = smoothstep(0.15, 1.0, vUv.x);
+        float bend = uBend * edge;
+
+        // "paper curl": sin vlna přes šířku
+        p.z += sin(vUv.x * 3.14159) * bend;
+
+        // jemná "twist" variace (aby to nebyla plastová deska)
+        p.z += (sin((vUv.y + uTime*0.15) * 8.0) * 0.02) * (uHover);
+
+        // mikro parallax v rámci karty
+        p.x += (vUv.y - 0.5) * 0.12 * uHover;
+
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `;
+
+    const fragment = `
+      varying vec2 vUv;
+      uniform sampler2D uMap;
+
+      void main(){
+        vec4 c = texture2D(uMap, vUv);
+        // jemné "papírové" zesvětlení nahoře
+        float top = smoothstep(0.0, 1.0, vUv.y);
+        c.rgb += 0.06 * top;
+        gl_FragColor = c;
+      }
+    `;
+
+    function makePaperMaterial(map){
+      return new THREE.ShaderMaterial({
+        transparent: true,
+        uniforms:{
+          uTime:{ value:0 },
+          uBend:{ value:0.0 },
+          uHover:{ value:0.0 },
+          uMap:{ value: map }
+        },
+        vertexShader: vertex,
+        fragmentShader: fragment
       });
     }
 
-    // ---- group (ring) ----
+    // ---------- Cards Ring ----------
     const group = new THREE.Group();
     scene.add(group);
 
-    const meshes = [];
-    const originals = []; // store base positions for bend calc
-    const cardsCount = CARDS.length;
+    const R = 6.2;                 // radius kruhu
+    const cardW = 3.0;
+    const cardH = 4.0;
+    const segX = 28;               // více segmentů = "papír"
+    const segY = 36;
 
-    // Ring layout params (tune for your taste)
-    const radius = 3.25;
-    const arc = Math.PI * 1.10; // visible arc (like Milla: not full 360)
-    const centerAngle = 0;      // forward direction
+    const geom = new THREE.PlaneGeometry(cardW, cardH, segX, segY);
 
-    for(let i=0;i<cardsCount;i++){
-      const geom = baseGeom.clone();
-      const mesh = new THREE.Mesh(geom, makeMaterial(i));
-      mesh.userData.index = i;
+    const cards = [];
+    const N = items.length;
+
+    for(let i=0;i<N;i++){
+      const theta = (i / N) * Math.PI * 2;
+
+      const tex = makeCardTexture(items[i]);
+      const mat = makePaperMaterial(tex);
+
+      const mesh = new THREE.Mesh(geom, mat);
+
+      // pozice na kruhu
+      mesh.position.set(Math.sin(theta)*R, 0, Math.cos(theta)*R);
+
+      // otočení tak, aby karta "koukala ven" z kruhu
+      mesh.rotation.y = theta;
+
+      // mírné natočení (editorial feel)
+      mesh.rotation.z = (Math.sin(theta)*0.06);
 
       group.add(mesh);
-      meshes.push(mesh);
-
-      // Init transform will be set in layout()
-      originals.push({
-        pos: new THREE.Vector3(),
-        rotY: 0
-      });
+      cards.push(mesh);
     }
 
-    // ---- interaction state ----
-    let targetSpin = 0;   // where user wants to spin (drag/click)
-    let spin = 0;         // actual spin (eased)
-    let isDown = false;
-    let downX = 0;
-    let downSpin = 0;
-
+    // ---------- Interaction (NO drag) ----------
     const mouse = new THREE.Vector2(0,0);
-    const raycaster = new THREE.Raycaster();
-    let hovered = null;
+    let targetRot = 0;
+    let rot = 0;
 
-    // Focus logic
-    let focusedIndex = 0;
+    // spring pro bend (pseudo-fyzika)
+    let bend = 0;
+    let bendV = 0;
 
-    function layout(){
-      // We place cards along a "partial ring" (arc) and animate via spin
-      for(let i=0;i<cardsCount;i++){
-        const t = i/(cardsCount-1);               // 0..1 along arc
-        const a = (t-0.5)*arc + centerAngle + spin; // angle
-        const x = Math.sin(a) * radius;
-        const z = Math.cos(a) * radius;
+    // hover spring
+    let hover = 0;
+    let hoverV = 0;
 
-        // Face tangent-ish towards camera
-        const rotY = Math.atan2(x, z);
+    function onMove(e){
+      const r = wrap.getBoundingClientRect();
+      const mx = ( (e.clientX - r.left) / r.width ) * 2 - 1;
+      const my = ( (e.clientY - r.top) / r.height ) * 2 - 1;
+      mouse.set(mx, -my);
 
-        const mesh = meshes[i];
-        mesh.position.set(x, 0, z);
-        mesh.rotation.set(0, rotY, 0);
+      // rotace prstencem: jemná, ne přestřelená
+      targetRot = -mx * 0.85;
 
-        originals[i].pos.copy(mesh.position);
-        originals[i].rotY = rotY;
+      // bend target: závisí na rychlosti / pozici
+      const bendTarget = Math.abs(mx) * 0.42;
+      // jednoduchý spring: (k - damping)
+      const k = 0.08, d = 0.78;
+      bendV = bendV * d + (bendTarget - bend) * k;
+      bend += bendV;
 
-        // Depth cue: scale a bit when near center
-        const centerBoost = 1.0 - clamp(Math.abs(a-centerAngle)/ (arc*0.55), 0, 1);
-        const s = lerp(0.90, 1.07, centerBoost);
-        mesh.scale.setScalar(s);
-
-        // Also slight opacity falloff to edges (editorial softness)
-        const mat = mesh.material;
-        mat.opacity = lerp(0.45, 1.0, centerBoost);
-      }
+      // hover target (pro jemné twichy)
+      const hoverTarget = Math.min(1.0, Math.abs(my) + Math.abs(mx)) * 0.6;
+      const hk = 0.07, hd = 0.80;
+      hoverV = hoverV * hd + (hoverTarget - hover) * hk;
+      hover += hoverV;
     }
 
-    function updateHover(){
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(meshes, false);
-      const hit = hits[0]?.object || null;
-      hovered = hit;
+    window.addEventListener("mousemove", onMove, { passive:true });
 
-      // Cursor feedback
-      renderer.domElement.style.cursor = hovered ? "pointer" : (isDown ? "grabbing" : "grab");
-    }
+    // Touch (mobile): mapuj na move
+    window.addEventListener("touchmove", (e)=>{
+      if(!e.touches?.length) return;
+      onMove(e.touches[0]);
+    }, { passive:true });
 
-    // Paper bend: deform plane vertices (cheap but effective)
-    function bendMesh(mesh, i){
-      const geom = mesh.geometry;
-      const pos = geom.attributes.position;
+    // ---------- Animate ----------
+    const clock = new THREE.Clock();
 
-      // How "front" is the card (use angle distance)
-      // more front => more responsive
-      const aDist = Math.abs((originals[i].rotY) - 0);
-      const frontness = 1.0 - clamp(aDist / 1.4, 0, 1);
+    function tick(){
+      const t = clock.getElapsedTime();
 
-      // Mouse influence: -1..1
-      const mx = mouse.x;
-      const my = mouse.y;
+      // inertia pro rotaci (plynulost)
+      rot += (targetRot - rot) * 0.045;
+      group.rotation.y = rot;
 
-      // Base curvature + hover pop
-      const isHover = hovered === mesh;
-      const baseCurve = lerp(0.06, 0.14, frontness) + (isHover ? 0.05 : 0.0);
-      const mouseCurve = (mx * 0.08 + my * 0.05) * (0.6 + frontness*0.6);
+      // camera parallax (Milla vibe)
+      camera.position.x += (mouse.x * 0.55 - camera.position.x) * 0.05;
+      camera.position.y += (mouse.y * 0.28 - camera.position.y) * 0.05;
+      camera.lookAt(0, 0.0, 0);
 
-      // Bend around X (left-right curl)
-      for(let v=0; v<pos.count; v++){
-        const x = pos.getX(v);
-        const y = pos.getY(v);
-
-        // normalized -1..1 across width/height
-        const nx = x/(W/2);
-        const ny = y/(H/2);
-
-        // main bend
-        const zBend = (Math.sin(nx * Math.PI * 0.5) * baseCurve)
-                    + (Math.sin((nx+mx*0.35) * Math.PI * 0.5) * mouseCurve);
-
-        // micro "paper flutter" on hover
-        const flutter = isHover ? Math.sin((ny*3.0 + performance.now()*0.002)) * 0.008 : 0;
-
-        pos.setZ(v, zBend + flutter);
+      // update shader uniforms
+      for(const m of cards){
+        m.material.uniforms.uTime.value = t;
+        m.material.uniforms.uBend.value = bend;
+        m.material.uniforms.uHover.value = hover;
       }
-      pos.needsUpdate = true;
-      geom.computeVertexNormals();
-
-      // Subtle tilt to mouse (feels alive)
-      const tiltX = (hovered === mesh ? -mouse.y : 0) * 0.10;
-      const tiltZ = (hovered === mesh ?  mouse.x : 0) * 0.06;
-      mesh.rotation.x = lerp(mesh.rotation.x, tiltX, 0.12);
-      mesh.rotation.z = lerp(mesh.rotation.z, tiltZ, 0.12);
-    }
-
-    // ---- events ----
-    const el = renderer.domElement;
-
-    el.addEventListener("pointerdown", (e)=>{
-      isDown = true;
-      downX = e.clientX;
-      downSpin = targetSpin;
-      el.setPointerCapture(e.pointerId);
-      updateHover();
-    });
-
-    el.addEventListener("pointermove", (e)=>{
-      const rect = el.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-
-      if(isDown){
-        const dx = (e.clientX - downX) / rect.width;
-        targetSpin = downSpin + dx * 2.2; // drag sensitivity
-      }
-      updateHover();
-    });
-
-    el.addEventListener("pointerup", (e)=>{
-      isDown = false;
-      el.releasePointerCapture(e.pointerId);
-      updateHover();
-    });
-
-    el.addEventListener("click", ()=>{
-      if(!hovered) return;
-
-      // Find index and rotate ring so hovered card comes to center
-      const idx = hovered.userData.index;
-      focusedIndex = idx;
-
-      // Compute its current angle (approx) and drive targetSpin
-      // We know card i sits at angle: a = (t-0.5)*arc + spin
-      // To bring it to centerAngle => need spin shift of -(t-0.5)*arc
-      const t = idx/(cardsCount-1);
-      const offset = (t-0.5)*arc;
-      targetSpin = -offset; // center it
-    });
-
-    window.addEventListener("resize", ()=>{
-      camera.aspect = window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // Fake "sound toggle" like the reference UI
-    const soundBtn = document.getElementById("soundBtn");
-    let soundOn = false;
-    soundBtn.addEventListener("click", ()=>{
-      soundOn = !soundOn;
-      soundBtn.textContent = soundOn ? "ON 🔊" : "OFF 🔇";
-    });
-
-    // ---- loop ----
-    function animate(){
-      requestAnimationFrame(animate);
-
-      // easing
-      spin += (targetSpin - spin) * 0.08;
-
-      layout();
-      for(let i=0;i<cardsCount;i++){
-        bendMesh(meshes[i], i);
-      }
-
-      // Slight camera float (editorial calm)
-      camera.position.y = 0.18 + Math.sin(performance.now()*0.0004)*0.03;
-      camera.lookAt(0, 0, 0);
 
       renderer.render(scene, camera);
+      requestAnimationFrame(tick);
     }
-    layout();
-    animate();
+    tick();
+
+    // ---------- Resize ----------
+    const ro = new ResizeObserver(()=>{
+      const w = wrap.clientWidth, h = wrap.clientHeight;
+      renderer.setSize(w,h);
+      camera.aspect = w/h;
+      camera.updateProjectionMatrix();
+    });
+    ro.observe(wrap);
   </script>
 </body>
 </html>
