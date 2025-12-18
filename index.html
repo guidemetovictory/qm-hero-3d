@@ -2,264 +2,165 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
-    <title>Milla Nova | 1:1 Engineering Replica</title>
+    <title>Milla Nova 3D - Prototyp 1:1 (Fáze 1)</title>
     <style>
-        body { margin: 0; background: #ececec; overflow: hidden; font-family: serif; }
-        #canvas-container { position: fixed; inset: 0; }
-        #explore-cursor {
-            position: fixed; width: 120px; height: 120px; background: #a3322d; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center; color: #fff;
-            font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
-            pointer-events: none; z-index: 1000; opacity: 0; transform: scale(0);
-            will-change: transform;
-        }
-        .ui {
-            position: fixed; inset: 0; pointer-events: none; z-index: 10;
-            display: flex; flex-direction: column; justify-content: space-between; padding: 50px;
-        }
-        .ui div { opacity: 0.5; letter-spacing: 3px; font-size: 12px; }
+        body { margin: 0; overflow: hidden; background: #ececec; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; color: #333; text-align: center; width: 100%; }
+        .label { position: absolute; bottom: 50px; width: 100%; text-align: center; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; opacity: 0.5; }
     </style>
 </head>
 <body>
-
-<div id="explore-cursor">Explore</div>
-<div id="canvas-container"></div>
-<div class="ui">
-    <div style="text-align: center">MILLA NOVA — COUTURE</div>
-    <div style="display: flex; justify-content: space-between">
-        <span>COLLECTION 2025</span>
-        <span>SCROLL TO EXPLORE</span>
+    <div id="ui">
+        <h1 style="font-weight: 100; letter-spacing: 10px; margin: 0;">MILLA NOVA</h1>
+        <p style="font-size: 10px; letter-spacing: 3px;">COUTURE</p>
     </div>
-</div>
+    <div class="label">Scroll to explore collection</div>
 
-<script type="module">
-    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
-    import { gsap } from 'https://cdn.skypack.dev/gsap';
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "gsap": "https://cdn.jsdelivr.net/npm/gsap@3.12.2/index.js" } }
+    </script>
 
-    // --- ARCHITEKTURA A KONFIGURACE ---
-    const CONFIG = {
-        radius: window.innerWidth < 768 ? 11 : 16,
-        cardCount: 14,
-        cardWidth: 5,
-        cardHeight: 7.2,
-        lerp: 0.05,
-        zoomDistance: 8.5
-    };
+    <script type="module">
+        import * as THREE from 'three';
+        import { gsap } from 'gsap';
 
-    const titles = ["Amour", "Couture", "Silk Way", "Ethereal", "Elegance", "Heritage", "Muse", "Nightfall", "Grace", "Timeless", "Ivory", "Petals", "Divine", "Luna"];
+        // --- CONFIGURACE ---
+        const CONFIG = {
+            radius: 18,
+            cardCount: 10,
+            friction: 0.95, // Setrvačnost
+            lerp: 0.05,
+            tiltStrength: 0.15
+        };
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xececec);
-    scene.fog = new THREE.Fog(0xececec, 15, 45);
+        let targetRot = 0;
+        let currentRot = 0;
+        let scrollVelocity = 0;
+        const mouse = new THREE.Vector2();
 
-    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.z = 30;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-    // --- SHADERY (Srdce vizuálu) ---
-    const vertexShader = `
-        uniform float uBend;
-        uniform float uRadius;
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            vec3 pos = position;
-            // Matematicky přesný ohyb válce
-            float angle = pos.x / uRadius;
-            pos.z += (cos(angle * uBend) * uRadius - uRadius);
-            pos.x = sin(angle * uBend) * uRadius;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-        }
-    `;
-
-    const fragmentShader = `
-        uniform sampler2D uMap;
-        uniform float uOpacity;
-        uniform float uHover;
-        uniform float uTime;
-        varying vec2 vUv;
-
-        float noise(vec2 p) {
-            return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-        }
-
-        void main() {
-            vec4 tex = texture2D(uMap, vUv);
-            // Film grain šum
-            float n = noise(vUv + uTime * 0.01) * 0.06;
-            // Dynamické nasvícení hran (Rim lighting)
-            float edge = smoothstep(0.47, 0.5, abs(vUv.x - 0.5));
-            float rim = pow(edge, 3.5) * 0.3 * (1.0 - uHover);
-            
-            vec3 color = tex.rgb + rim + n;
-            // Focus gradient (ztmavení neaktivních)
-            color = mix(color * 0.35, color, uOpacity);
-            gl_FragColor = vec4(color, uOpacity);
-        }
-    `;
-
-    // --- TVORBA OBJEKTŮ ---
-    function createText(txt) {
-        const can = document.createElement('canvas');
-        const ctx = can.getContext('2d');
-        can.width = 1024; can.height = 256;
-        ctx.font = '300 70px serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(txt.toUpperCase(), 512, 128);
-        const t = new THREE.CanvasTexture(can);
-        t.needsUpdate = true; return t;
-    }
-
-    const worldPivot = new THREE.Group();
-    scene.add(worldPivot);
-
-    const cards = [];
-    const loader = new THREE.TextureLoader();
-
-    for (let i = 0; i < CONFIG.cardCount; i++) {
-        const group = new THREE.Group();
-        const angle = (i / CONFIG.cardCount) * Math.PI * 2;
-        group.rotation.y = angle;
-        worldPivot.add(group);
-
-        const wrapper = new THREE.Group();
-        wrapper.position.z = CONFIG.radius;
-        group.add(wrapper);
-
-        // Karta Mesh
-        const mat = new THREE.ShaderMaterial({
-            uniforms: {
-                uMap: { value: loader.load(`https://picsum.photos/1000/1500?v=${i}`) },
-                uBend: { value: 1.0 },
-                uRadius: { value: CONFIG.radius },
-                uOpacity: { value: 1.0 },
-                uHover: { value: 0.0 },
-                uTime: { value: 0.0 }
-            },
-            vertexShader, fragmentShader, transparent: true, side: THREE.DoubleSide
-        });
-
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.cardWidth, CONFIG.cardHeight, 64, 1), mat);
-        wrapper.add(mesh);
-
-        // Text Mesh
-        const tMat = new THREE.ShaderMaterial({
-            uniforms: { uMap: { value: createText(titles[i]) }, uBend: { value: 1.0 }, uRadius: { value: CONFIG.radius }, uOpacity: { value: 0.0 } },
-            vertexShader,
-            fragmentShader: `uniform sampler2D uMap; uniform float uOpacity; varying vec2 vUv; void main() { vec4 c = texture2D(uMap, vUv); gl_FragColor = vec4(c.rgb, c.a * uOpacity); }`,
-            transparent: true
-        });
-        const tMesh = new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.cardWidth, 1.5, 64, 1), tMat);
-        tMesh.position.y = CONFIG.cardHeight / 2 + 1;
-        wrapper.add(tMesh);
-
-        cards.push({ group, wrapper, mesh, tMesh, angle });
-    }
-
-    // --- INTERAKCE A ANIMACE ---
-    let targetRot = 0, currentRot = 0, mouse = new THREE.Vector2(), isZoomed = false, activeCard = null;
-    const raycaster = new THREE.Raycaster();
-
-    window.addEventListener('wheel', (e) => { if(!isZoomed) targetRot -= e.deltaY * 0.0008; });
-    window.addEventListener('mousemove', (e) => {
-        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-        gsap.to("#explore-cursor", { x: e.clientX, y: e.clientY, duration: 0.2 });
-    });
-
-    window.addEventListener('click', () => {
-        if(isZoomed) { returnToGallery(); return; }
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
-        if(hits.length > 0) {
-            activeCard = cards.find(c => c.mesh === hits[0].object);
-            zoomIn(activeCard);
-        }
-    });
-
-    function zoomIn(card) {
-        isZoomed = true;
-        const tl = gsap.timeline();
-        // 1. Vyrovnání rotace celého světa na kartu
-        tl.to(worldPivot.rotation, { y: -card.angle, duration: 1.6, ease: "expo.inOut" });
-        // 2. Nálet kamery hluboko k objektu
-        tl.to(camera.position, { z: CONFIG.zoomDistance, duration: 1.6, ease: "expo.inOut" }, 0);
-        // 3. Narovnání ohybu karty (Bend -> 0)
-        tl.to(card.mesh.material.uniforms.uBend, { value: 0, duration: 1.4, ease: "power4.out" }, 0.2);
-        tl.to(card.wrapper.position, { z: CONFIG.radius + 1, duration: 1.6, ease: "expo.inOut" }, 0);
-        // 4. Fade out ostatních
-        cards.forEach(c => {
-            if(c !== card) {
-                tl.to(c.mesh.material.uniforms.uOpacity, { value: 0, duration: 0.6 }, 0);
-                tl.to(c.tMesh.material.uniforms.uOpacity, { value: 0, duration: 0.3 }, 0);
-            }
-        });
-    }
-
-    function returnToGallery() {
-        const tl = gsap.timeline({ onComplete: () => { isZoomed = false; activeCard = null; } });
-        tl.to(camera.position, { z: 30, duration: 1.4, ease: "expo.inOut" });
-        tl.to(worldPivot.rotation, { y: currentRot, duration: 1.4, ease: "expo.inOut" }, 0);
-        cards.forEach(c => {
-            tl.to(c.mesh.material.uniforms.uBend, { value: 1.0, duration: 1.2 }, 0);
-            tl.to(c.mesh.material.uniforms.uOpacity, { value: 1.0, duration: 1.0 }, 0);
-            tl.to(c.wrapper.position, { z: CONFIG.radius, duration: 1.2 }, 0);
-        });
-    }
-
-    function animate() {
-        requestAnimationFrame(animate);
-        if(!isZoomed) {
-            // Infinite scroll logic
-            if (targetRot < -Math.PI) { targetRot += Math.PI*2; currentRot += Math.PI*2; }
-            if (targetRot > Math.PI) { targetRot -= Math.PI*2; currentRot -= Math.PI*2; }
-            currentRot += (targetRot - currentRot) * CONFIG.lerp;
-            worldPivot.rotation.y = currentRot;
-        }
-
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
-        let hovered = null;
-
-        cards.forEach(card => {
-            card.mesh.material.uniforms.uTime.value = performance.now() * 0.001;
-            const worldPos = new THREE.Vector3();
-            card.mesh.getWorldPosition(worldPos);
-            const dist = Math.abs(worldPos.x);
-            
-            if(!isZoomed) {
-                // Focus & Text Visibility logic
-                const opacityWeight = Math.max(0, 1.0 - (dist / 14));
-                card.mesh.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(card.mesh.material.uniforms.uOpacity.value, 0.3 + (opacityWeight * 0.7), 0.1);
-                card.tMesh.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(card.tMesh.material.uniforms.uOpacity.value, dist < 2.5 ? 1 : 0, 0.1);
-
-                if(hits.length > 0 && hits[0].object === card.mesh) {
-                    hovered = card;
-                    gsap.to(card.wrapper.position, { z: CONFIG.radius + 2, duration: 0.6 });
-                    gsap.to(card.mesh.material.uniforms.uBend, { value: 0.15, duration: 0.6 });
-                    gsap.to(card.mesh.material.uniforms.uHover, { value: 1.0, duration: 0.4 });
-                } else {
-                    gsap.to(card.wrapper.position, { z: CONFIG.radius, duration: 0.8 });
-                    gsap.to(card.mesh.material.uniforms.uBend, { value: 1.0, duration: 0.8 });
-                    gsap.to(card.mesh.material.uniforms.uHover, { value: 0.0, duration: 0.4 });
-                }
-            }
-        });
-
-        gsap.to("#explore-cursor", { opacity: hovered ? 1 : 0, scale: hovered ? 1 : 1e-4, duration: 0.3 });
-        renderer.render(scene, camera);
-    }
-    animate();
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        // --- SCÉNA ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xececec);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 4, 35);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-</script>
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        const worldPivot = new THREE.Group();
+        scene.add(worldPivot);
+
+        // --- SHADER ---
+        const vertexShader = `
+            uniform float uBend;
+            uniform float uVelocity;
+            uniform float uMouseY;
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                vec3 pos = position;
+                
+                // Organická deformace podle pohybu a myši
+                float wave = sin(uv.x * 3.14) * uVelocity * 0.15;
+                float mouseWarp = sin(uv.y * 3.14) * uMouseY * 1.5;
+                pos.z += wave + mouseWarp;
+
+                // Matematicky správný cylindrický ohyb (bez smršťování)
+                float r = 18.0; 
+                float angle = pos.x / r;
+                pos.z += (cos(angle * uBend) * r - r);
+                pos.x = sin(angle * uBend) * r;
+
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform sampler2D uTexture;
+            varying vec2 vUv;
+            void main() {
+                vec4 tex = texture2D(uTexture, vUv);
+                gl_FragColor = tex;
+            }
+        `;
+
+        // --- KARTY ---
+        const cards = [];
+        const textureLoader = new THREE.TextureLoader();
+
+        for(let i = 0; i < CONFIG.cardCount; i++) {
+            const group = new THREE.Group();
+            const angle = (i / CONFIG.cardCount) * Math.PI * 2;
+            
+            group.position.x = Math.sin(angle) * CONFIG.radius;
+            group.position.z = Math.cos(angle) * CONFIG.radius;
+            group.rotation.y = angle;
+
+            const geometry = new THREE.PlaneGeometry(9, 12, 32, 32);
+            const material = new THREE.ShaderMaterial({
+                vertexShader,
+                fragmentShader,
+                uniforms: {
+                    uTexture: { value: textureLoader.load(`https://picsum.photos/seed/${i+50}/800/1100`) },
+                    uBend: { value: 1.0 },
+                    uVelocity: { value: 0 },
+                    uMouseY: { value: 0 }
+                },
+                side: THREE.DoubleSide
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            group.add(mesh);
+            worldPivot.add(group);
+            cards.push({ group, mesh, angle });
+        }
+
+        // --- EVENTY ---
+        window.addEventListener('wheel', (e) => {
+            scrollVelocity -= e.deltaY * 0.00005;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // --- LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Fyzika scrollu
+            scrollVelocity *= CONFIG.friction;
+            currentRot += scrollVelocity;
+            worldPivot.rotation.y = currentRot;
+
+            // Tilt celého světa
+            const targetPitch = -0.15 + (mouse.y * CONFIG.tiltStrength);
+            worldPivot.rotation.x = THREE.MathUtils.lerp(worldPivot.rotation.x, targetPitch, 0.05);
+
+            // Update karet
+            cards.forEach(card => {
+                card.mesh.material.uniforms.uVelocity.value = scrollVelocity * 50;
+                card.mesh.material.uniforms.uMouseY.value = mouse.y * 0.2;
+                
+                // Jemné vyklonění aktivní karty dopředu (pohled na kameru)
+                const worldPos = new THREE.Vector3();
+                card.mesh.getWorldPosition(worldPos);
+                const isFront = Math.abs(worldPos.x) < 5 && worldPos.z > 10;
+                
+                gsap.to(card.mesh.position, {
+                    z: isFront ? 2 : 0,
+                    duration: 0.5
+                });
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
 </body>
 </html>
