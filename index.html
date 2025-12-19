@@ -2,37 +2,54 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QM 3D Hero</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; }
-        #three-container { width: 100vw; height: 100vh; }
+        /* Odstranění okrajů a nastavení pozadí na černou */
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+        #three-container { width: 100%; height: 100%; display: block; }
     </style>
 </head>
 <body>
     <div id="three-container"></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
     <script>
-    (function() {
+    window.onload = function() {
         const container = document.getElementById('three-container');
+        if (!container) return;
+
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = 2.2;
+
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
+        // MATCAP - Tato textura vytvoří ten stříbrný rtuťový efekt
         const loader = new THREE.TextureLoader();
-        // Matcap textura pro stříbrný rtuťový vzhled
-        const matcap = loader.load('https://raw.githubusercontent.com/nidorx/matcaps/master/1024/E6E6E6_333333_666666_999999-1024px.png');
+        // Používáme prověřený Matcap z CDN pro maximální stabilitu
+        const matcap = loader.load('https://raw.githubusercontent.com/nidorx/matcaps/master/1024/E6E6E6_333333_666666_999999-1024px.png', 
+            () => { console.log('Texture loaded'); renderer.render(scene, camera); },
+            undefined,
+            (err) => { console.error('Error loading texture', err); }
+        );
+
         const material = new THREE.MeshMatcapMaterial({ matcap: matcap });
         const geometry = new THREE.IcosahedronGeometry(1, 64);
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
         const clock = new THREE.Clock();
+
         function animate() {
             requestAnimationFrame(animate);
             const t = clock.getElapsedTime() * 0.4;
+            
+            // Fluidní deformace (rtuť)
             const pos = mesh.geometry.attributes.position;
             const v = new THREE.Vector3();
             for (let i = 0; i < pos.count; i++) {
@@ -43,15 +60,19 @@
             }
             pos.needsUpdate = true;
             mesh.rotation.y += 0.002;
+            
             renderer.render(scene, camera);
         }
+
         animate();
+
+        // Responzivita při změně velikosti okna
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-    })();
+    };
     </script>
 </body>
 </html>
